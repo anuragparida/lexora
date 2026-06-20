@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Node
+node_modules/
+.pnpm-store/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local env files / secrets
+.env
+.env.local
+*.local
+
+# Logs
+*.log
+logs/
+
+# Build output
+frontend/dist/
+
+# Backend runtime data
+# The .db file is generated from the (private) loader pipeline. Keep it
+# in the repo so `docker compose up` Just Works on a fresh clone, but
+# allow local replacement.
+backend/data/*.db.local
+
+# Generated Anki decks are produced at runtime by the API. Keep them
+# out of git history.
+backend/generated_decks/
