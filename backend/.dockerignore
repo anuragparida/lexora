@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.uv-cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+generated_decks/
+tests/
+*.log

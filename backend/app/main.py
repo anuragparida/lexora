@@ -1,16 +1,33 @@
 import os
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from app import crud, models, schemas, anki_builder
-from app.database import get_db, engine, run_migrations
+from app import crud, models, schemas, anki_builder, bootstrap
+from app.database import get_db, engine
+from app.observability import _ensure_client
 
-models.Base.metadata.create_all(bind=engine)
-run_migrations()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("lexora.main")
 
-app = FastAPI(title="German Vocabulary API", version="0.1.0")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: ensure schema (Alembic owns migrations), seed corpus if
+    Postgres is empty, and warm the Langfuse client (no tracing yet).
+    Phase 4 wires real observability call sites."""
+    logger.info("startup: ensuring schema via Base.metadata.create_all")
+    models.Base.metadata.create_all(bind=engine)
+    logger.info("startup: seeding corpus from SQLite if Postgres is empty")
+    bootstrap.seed_corpus()
+    logger.info("startup: warming Langfuse client (Phase 4 will use it)")
+    _ensure_client()
+    yield
+
+
+app = FastAPI(title="German Vocabulary API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

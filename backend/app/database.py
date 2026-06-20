@@ -1,17 +1,26 @@
+import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
-import os
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/vocabeo_words.db")
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}
-    if DATABASE_URL.startswith("sqlite")
-    else {},
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "sqlite:///./data/vocabeo_words.db"
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+
+def _engine_kwargs(url: str) -> dict:
+    """Per-dialect engine kwargs."""
+    if url.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False}}
+    if url.startswith("postgresql"):
+        # pool_pre_ping guards against stale connections when the
+        # postgres container restarts between requests.
+        return {"pool_pre_ping": True}
+    return {}
+
+
+engine = create_engine(DATABASE_URL, **_engine_kwargs(DATABASE_URL))
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
@@ -21,18 +30,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-def run_migrations():
-    """Run simple migrations to add missing columns"""
-    with engine.connect() as conn:
-        # Check if is_complete column exists
-        result = conn.execute(text("PRAGMA table_info(words)"))
-        columns = [row[1] for row in result]
-
-        if "is_complete" not in columns:
-            conn.execute(
-                text("ALTER TABLE words ADD COLUMN is_complete BOOLEAN DEFAULT 0")
-            )
-            conn.commit()
-            print("Added is_complete column to words table")

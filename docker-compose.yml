@@ -1,4 +1,21 @@
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "25432:5432"
+    environment:
+      POSTGRES_DB: lexora
+      POSTGRES_USER: lexora
+      POSTGRES_PASSWORD: lexora
+    volumes:
+      - lexora_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lexora -d lexora"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -9,7 +26,22 @@ services:
       - ./backend/data:/app/data
       - ./backend/generated_decks:/app/generated_decks
     environment:
-      - DATABASE_URL=sqlite:///./data/vocabeo_words.db
+      # Postgres is the default. SQLite override:
+      # DATABASE_URL=sqlite:///./data/vocabeo_words.db
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://lexora:lexora@postgres:5432/lexora}
+      # LANGFUSE_*_KEY come from ~/.lexora/.env (project .env or shell).
+      # LANGFUSE_HOST is hard-coded to host.docker.internal because the
+      # backend container must reach the host's shared Langfuse at
+      # 13000 — "localhost" inside the container points at itself.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: http://host.docker.internal:13000
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -29,3 +61,6 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+
+volumes:
+  lexora_postgres_data:
