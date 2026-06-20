@@ -1,0 +1,33 @@
+BUTTON: svelte-1f9ga4z: close
+BUTTON: button-primary: Start Tour
+LI: svelte-oebhjk: vocabeo
+A: svelte-oebhjk: vocabeo
+DIV: logo nav svelte-1n3jvl1: vocabeo
+DIV: logo-vocabeo svelte-1n3jvl1: vocabeo
+LI: svelte-oebhjk: Test mode  »
+A: svelte-oebhjk: Test mode  »
+LI: svelte-oebhjk: | Sign in
+A: svelte-oebhjk: | Sign in
+LI: svelte-1vdefj: Browse  »
+A: svelte-1vdefj: Browse  »
+DIV: right svelte-1vdefj active: Browse  »
+LI: svelte-1vdefj: Learn  »
+A: svelte-1vdefj: Learn  »
+DIV: right svelte-1vdefj: Learn  »
+LI: svelte-1vdefj: Stats  »
+A: svelte-1vdefj: Stats  »
+DIV: right svelte-1vdefj: Stats  »
+DIV: : Search 6,260 words  reset search
+DIV: svelte-15hy6mi: Search 6,260 words
+DIV: svelte-15hy6mi: 6,260 words
+DIV: svelte-15hy6mi: 6,260
+DIV: svelte-15hy6mi: words
+DIV: svelte-15hy6mi: reset search
+BUTTON: svelte-15hy6mi invisible: reset search
+DIV: segmented-control-title svelte-10hzati: Sort by
+DIV: segmented-control-row svelte-116zyym: Frequency  Alphabetically
+DIV: segmented-control-option svelte-1cqys5: Frequency
+DIV: segmented-control-option svelte-1cqys5: Alphabetically
+DIV: segmented-control-row svelte-116zyym: Date Saved  Next Review
+DIV: segmented-control-option svelte-1cqys5: Date Saved
+DIV: segmented-control-option svelte-1cqys5: Next Review
