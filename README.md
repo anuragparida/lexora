@@ -18,9 +18,9 @@ separately and is not part of this repository.
 docker compose up --build
 ```
 
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
-- API docs: http://localhost:8000/docs
+- Frontend: http://localhost:18701
+- Backend API: http://localhost:18700
+- API docs: http://localhost:18700/docs
 
 ## Development
 

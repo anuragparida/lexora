@@ -14,7 +14,8 @@ uv sync
 uv run python main.py
 ```
 
-The API listens on `:8000`. Interactive docs at `/docs`.
+The API listens on `:8000` inside the container (host port `18700` per
+`docker-compose.yml`). Interactive docs at `/docs`.
 
 ## Data
 
