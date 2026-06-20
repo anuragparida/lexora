@@ -13,10 +13,16 @@ dependencies = [
     "alembic>=1.13.0",
     "psycopg[binary]>=3.2.0",
     "langfuse>=2.50.0",
+    "httpx>=0.27.0",
+    "pgvector>=0.3.6",
+    "pytest>=8.3.0",
+    "respx>=0.21.0",
 ]
 
 [tool.uv]
-dev-dependencies = []
+
+[dependency-groups]
+dev = []
 
 [project.scripts]
 backend = "backend.main:main"

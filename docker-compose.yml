@@ -2,7 +2,11 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     ports:
-      - "25432:5432"
+      # Override via POSTGRES_HOST_PORT when running a second copy of
+      # the stack (e.g. Phase 1 QA against a stack that's still up
+      # from Phase 0 on 25432). Compose v2.24+ supports the !reset
+      # form to clear inherited port mappings.
+      - "${POSTGRES_HOST_PORT:-25432}:5432"
     environment:
       POSTGRES_DB: lexora
       POSTGRES_USER: lexora
@@ -21,7 +25,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "18700:8000"
+      - "${BACKEND_HOST_PORT:-18700}:8000"
     volumes:
       - ./backend/data:/app/data
       - ./backend/generated_decks:/app/generated_decks
@@ -36,6 +40,16 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: http://host.docker.internal:13000
+      # OpenRouter — used by the embedding client (Phase 1) and the
+      # chat client (Phase 4). Key comes from the host systemd env
+      # (`~/.config/environment.d/hermes-openrouter.conf`) which
+      # docker compose picks up automatically via the shell.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-qwen/qwen3-embedding-8b}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
+      EMBEDDING_MAX_ATTEMPTS: ${EMBEDDING_MAX_ATTEMPTS:-3}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -53,9 +67,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "18701:5173"
+      - "${FRONTEND_HOST_PORT:-18701}:5173"
     environment:
-      - VITE_API_URL=http://localhost:18700
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:18700}
     depends_on:
       - backend
     volumes:

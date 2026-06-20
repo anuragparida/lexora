@@ -1,0 +1,1 @@
+# scripts package marker. Lets ``uv run python -m scripts.backfill_embeddings`` resolve.

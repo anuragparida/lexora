@@ -7,9 +7,28 @@ from sqlalchemy import (
     Boolean,
     Float,
     DateTime,
+    LargeBinary,
 )
 from sqlalchemy.orm import relationship
-from app.database import Base
+from app.database import Base, DATABASE_URL
+
+# Phase 1: embeddings live in a pgvector ``vector(1024)`` column on
+# Postgres and a BLOB on SQLite (dev fallback). The pgvector type
+# is only importable when the lib is installed — wrap the import so
+# the SQLite fallback path doesn't break in environments where the
+# pgvector python lib isn't available (the runtime branch below
+# falls back to ``LargeBinary``).
+if DATABASE_URL.startswith("postgresql"):
+    try:
+        from pgvector.sqlalchemy import Vector
+        _EMBEDDING_TYPE = Vector(1024)
+    except ImportError:
+        # pgvector lib missing — degrade to LargeBinary so the model
+        # still loads. The retrieval endpoint will detect this and
+        # return 503.
+        _EMBEDDING_TYPE = LargeBinary
+else:
+    _EMBEDDING_TYPE = LargeBinary
 
 
 class Word(Base):
@@ -30,6 +49,10 @@ class Word(Base):
         "Example", back_populates="word", cascade="all, delete-orphan"
     )
     verb_conjugation = relationship("VerbConjugation", back_populates="words")
+    # Phase 1: nullable so the backfill script can populate incrementally
+    # without a schema rewrite. The ``vector(1024)`` (Postgres) /
+    # ``BLOB`` (SQLite) type is selected at import time above.
+    embedding = Column(_EMBEDDING_TYPE, nullable=True)
 
 
 class Example(Base):
@@ -41,6 +64,9 @@ class Example(Base):
     english = Column(Text)
 
     word = relationship("Word", back_populates="examples")
+    # Phase 1: nullable embedding column. Same dialect-aware type
+    # selection as ``Word.embedding``.
+    embedding = Column(_EMBEDDING_TYPE, nullable=True)
 
 
 class VerbConjugation(Base):
