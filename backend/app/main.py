@@ -181,34 +181,42 @@ def _trace_retrieval(
 ) -> None:
     """Emit one Langfuse trace per retrieval call (best-effort).
 
-    Langfuse v2 uses ``start_as_current_observation`` (renamed from
-    the v1 ``start_as_current_span``). The observation type "span"
-    is the right shape for a request-level event — the exercise
-    generator (Phase 4) will wrap this in a parent generation.
+    Phase 1 fix (t_2e386ba9 / Helena review §7): use the v2 SDK's
+    ``client.span(...)`` + ``span.update(...)`` + ``span.end()``
+    sequence. The earlier ``client.start_as_current_observation``
+    call is a v3-only API; on the v2.60.10 SDK (the floor pinned by
+    pyproject.toml to match the v2.95.11 server) the method does
+    not exist and the call was silently swallowed by the
+    ``except Exception`` below, so every retrieval was untraced.
+    The non-context-manager shape is the canonical v2 pattern:
+    span() returns a handle, update() merges metadata, end()
+    closes the observation, flush() pushes to the ingestion API.
     """
     client = get_langfuse()
     if client is None:
         # Keys missing — already warned at startup. Don't spam per call.
         return
+    span = None
     try:
-        with client.start_as_current_observation(
-            as_type="span",
-            name="lexora.retrieval",
-        ) as span:
-            span.update(
-                metadata={
-                    "query_text": query,
-                    "query_len_chars": len(query),
-                    "k": k,
-                    "source": source,
-                    "result_count": result_count,
-                },
-                metrics={
-                    "embed_latency_ms": embed_ms,
-                    "query_latency_ms": query_ms,
-                    "total_latency_ms": total_ms,
-                },
-            )
+        span = client.span(name="lexora.retrieval")
+        span.update(
+            metadata={
+                "query_text": query,
+                "query_len_chars": len(query),
+                "k": k,
+                "source": source,
+                "result_count": result_count,
+                # v2 ``span.update`` does not accept a separate
+                # ``metrics`` kwarg — latency is encoded as metadata
+                # keys with ``_ms`` suffixes so it's filterable in
+                # the UI. Phase 4 will wire the v3 generation API
+                # for true usage/cost metrics.
+                "embed_latency_ms": embed_ms,
+                "query_latency_ms": query_ms,
+                "total_latency_ms": total_ms,
+            },
+        )
+        span.end()
         # Langfuse buffers traces and flushes asynchronously. Force
         # a flush so the trace is queryable in the UI before the
         # request returns — important for QA validation, less
@@ -217,6 +225,13 @@ def _trace_retrieval(
     except Exception as exc:
         # Tracing failures must never break the request. Log and move on.
         logger.warning("retrieve: Langfuse trace failed (non-fatal): %s", exc)
+        # Make sure a half-opened span is closed even on failure so
+        # we don't leak a background flush task.
+        if span is not None:
+            try:
+                span.end()
+            except Exception:
+                pass
 
 
 @app.post("/decks/generate")

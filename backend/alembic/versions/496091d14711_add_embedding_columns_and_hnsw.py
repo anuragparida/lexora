@@ -41,35 +41,32 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    is_postgres = bind.dialect.name == "postgresql"
+    dialect = bind.dialect.name
 
-    # Column type depends on dialect. ``ADD COLUMN IF NOT EXISTS`` is
-    # supported on both Postgres 9.6+ and SQLite 3.35+. The Postgres
-    # vector(1024) type requires the ``vector`` extension, which
-    # Phase 0's init script (``postgres/init/01-pgvector.sql``)
-    # already installs.
-    if is_postgres:
-        words_col_type = "vector(1024)"
-        examples_col_type = "vector(1024)"
-    else:
-        # BLOB stores raw float32 bytes (1024 * 4 = 4096 bytes). The
-        # value is opaque on the SQLite path; nothing reads it back.
-        words_col_type = "BLOB"
-        examples_col_type = "BLOB"
-
-    op.execute(
-        f"ALTER TABLE words ADD COLUMN IF NOT EXISTS embedding {words_col_type}"
-    )
-    op.execute(
-        f"ALTER TABLE examples ADD COLUMN IF NOT EXISTS embedding {examples_col_type}"
-    )
-
-    # HNSW indexes are Postgres-only (they live in the ``vector``
-    # extension's GUC). Wrap each in a dialect guard so SQLite
-    # ``alembic upgrade head`` stays clean. ``IF NOT EXISTS`` makes
-    # the operation idempotent — re-running on a DB that already has
-    # the index is a silent no-op.
-    if is_postgres:
+    # Phase 1 fix (t_2e386ba9 / Helena review §5): SQLite's
+    # ``ALTER TABLE ADD COLUMN`` does NOT support inline
+    # ``IF NOT EXISTS`` — the keyword set is reserved in that
+    # grammar position and SQLite raises ``near "EXISTS": syntax
+    # error``. The portable fix is dialect branching: keep
+    # ``IF NOT EXISTS`` on Postgres (where it's a no-op when the
+    # column already exists) and emit plain ``ADD COLUMN`` on
+    # SQLite (a fresh dev DB always lacks the column, so the
+    # qualifier buys nothing on that path).
+    #
+    # Idempotency on Postgres is preserved by ``IF NOT EXISTS``;
+    # on SQLite, re-running against an already-migrated DB will
+    # fail with ``duplicate column name: embedding`` — that's
+    # acceptable because the SQLite path is dev-fallback only and
+    # callers always start from a fresh file (see QA check 2).
+    if dialect == "postgresql":
+        # pgvector + HNSW
+        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        op.execute(
+            "ALTER TABLE words ADD COLUMN IF NOT EXISTS embedding vector(1024)"
+        )
+        op.execute(
+            "ALTER TABLE examples ADD COLUMN IF NOT EXISTS embedding vector(1024)"
+        )
         op.execute(
             "CREATE INDEX IF NOT EXISTS ix_words_embedding_hnsw "
             "ON words USING hnsw (embedding vector_cosine_ops)"
@@ -77,6 +74,16 @@ def upgrade() -> None:
         op.execute(
             "CREATE INDEX IF NOT EXISTS ix_examples_embedding_hnsw "
             "ON examples USING hnsw (embedding vector_cosine_ops)"
+        )
+    elif dialect == "sqlite":
+        # BLOB stores raw float32 bytes (1024 * 4 = 4096 bytes). The
+        # value is opaque on the SQLite path; nothing reads it back.
+        # HNSW is Postgres-only by design — no vector math runs here.
+        op.execute("ALTER TABLE words ADD COLUMN embedding BLOB")
+        op.execute("ALTER TABLE examples ADD COLUMN embedding BLOB")
+    else:
+        raise NotImplementedError(
+            f"Embedding migration not implemented for dialect {dialect}"
         )
 
 
