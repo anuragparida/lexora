@@ -16,8 +16,11 @@ from sqlalchemy.orm import Session
 
 from app import models
 
-# Create decks directory
-DECKS_DIR = "/app/generated_decks"
+# Create decks directory. Path is env-overridable so tests (and any
+# future host-mount layout) can redirect to a writable location. The
+# container default stays /app/generated_decks because that's where
+# docker-compose.yml mounts the volume.
+DECKS_DIR = os.getenv("LEXORA_DECKS_DIR", "/app/generated_decks")
 os.makedirs(DECKS_DIR, exist_ok=True)
 
 
