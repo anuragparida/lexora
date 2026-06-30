@@ -221,3 +221,92 @@ class AuthResponse(BaseModel):
 
     access_token: str
     user: "UserOut"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.1 — Diagnostic probe request / response schemas
+#
+# Card t_41d85c32. The probe is a deterministic, auth-gated,
+# LLM-free questionnaire. Four endpoints:
+#
+#   POST /diagnostic/start   -> DiagnosticStartOut
+#   POST /diagnostic/answer  -> {"answered": N, "total": 10}
+#   GET  /diagnostic/result  -> DiagnosticResultOut
+#   POST /diagnostic/apply   -> WeaknessProfileOut (reuses 2.x shape)
+#
+# The question bank's scoring fields (delta / weight / axis_tags)
+# NEVER cross the wire — ``DiagnosticQuestionOut`` exposes only the
+# client-facing fields (id / prompt / kind / choices[].label).
+# ---------------------------------------------------------------------------
+
+
+class DiagnosticChoiceOut(BaseModel):
+    """A single client-facing choice. Only the human-readable label
+    is exposed — the server-side ``delta`` map is stripped so the
+    client can't reverse-engineer the scoring."""
+
+    label: str
+
+
+class DiagnosticQuestionOut(BaseModel):
+    """A client-facing question. Excludes ``axis_tags`` / ``weight``
+    (scoring internals); exposes only what the UI needs to render the
+    question and its options."""
+
+    id: str
+    prompt: str
+    kind: str
+    choices: List[DiagnosticChoiceOut]
+
+
+class DiagnosticStartOut(BaseModel):
+    """Response for ``POST /diagnostic/start``: the session handle
+    plus the full (stripped) question bank to render."""
+
+    session_id: str
+    questions: List[DiagnosticQuestionOut]
+
+
+class DiagnosticAnswerIn(BaseModel):
+    """Request body for ``POST /diagnostic/answer``.
+
+    ``session_id`` scopes the answer to a probe run; ``question_id``
+    and ``choice_label`` are validated against the bank in the route
+    layer (400 on an unknown id / label, 404 on a session that isn't
+    the caller's). All three fields are required and non-empty.
+    """
+
+    session_id: str = Field(..., min_length=1)
+    question_id: str = Field(..., min_length=1)
+    choice_label: str = Field(..., min_length=1)
+
+
+class DiagnosticAnswerOut(BaseModel):
+    """Response for ``POST /diagnostic/answer``: progress counters.
+
+    ``answered`` is the count of distinct questions answered in this
+    session; ``total`` is the fixed bank size (10).
+    """
+
+    answered: int
+    total: int
+
+
+class DiagnosticResultOut(BaseModel):
+    """Response for ``GET /diagnostic/result``.
+
+    ``axes`` maps every axis -> 0..3 (axes no answer touched are 0).
+    ``reasons`` maps only axes with score > 0 -> a one-line string
+    naming the top contributing questions. Matches the
+    ``WeaknessProfile`` axes shape so Apply is a direct UPSERT.
+    """
+
+    axes: Dict[str, int]
+    reasons: Dict[str, str]
+
+
+class DiagnosticApplyIn(BaseModel):
+    """Request body for ``POST /diagnostic/apply``: which session's
+    computed result to UPSERT into the caller's weakness profile."""
+
+    session_id: str = Field(..., min_length=1)

@@ -3,7 +3,6 @@ from datetime import datetime
 from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 
 from app import models
 from app.models import _is_pg
@@ -261,3 +260,156 @@ def serialize_weakness_profile_axes(
     Returns ``{}`` for a profile with a NULL or malformed axes value.
     """
     return _deserialize_axes(profile.axes)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.1 — Diagnostic probe CRUD (card t_41d85c32)
+#
+# The ``answers_json`` column is dialect-aware exactly like
+# ``WeaknessProfile.axes``: a dict on Postgres, a JSON-encoded string
+# on SQLite. The same ``_serialize_axes`` / ``_deserialize_axes``
+# helpers handle the shape because the storage discipline is
+# identical (both are JSON-object columns). Route code always sees a
+# ``Dict[str, str]`` (question_id -> choice_label).
+#
+# The Apply step calls the existing ``upsert_weakness_profile`` — the
+# diagnostic layer never duplicates the UPSERT logic.
+# ---------------------------------------------------------------------------
+
+
+def _serialize_answers(answers: Dict[str, str]) -> object:
+    """Storage shape for ``answers_json`` on the current dialect.
+
+    Postgres: the dict directly (JSON column). SQLite: a JSON string
+    (Text column). Mirrors ``_serialize_axes`` — kept as a separate
+    function so the intent reads clearly at the call sites.
+    """
+    if _is_pg():
+        return answers
+    return json.dumps(answers)
+
+
+def _deserialize_answers(raw: object) -> Dict[str, str]:
+    """Return a ``{question_id: choice_label}`` dict regardless of the
+    storage shape. Empty dict for NULL / malformed values."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def create_diagnostic_session(
+    db: Session, session_id: str, user_id: int
+) -> models.DiagnosticSession:
+    """Insert a fresh ``in_progress`` diagnostic session for a user.
+
+    ``session_id`` is a UUID4 string minted by the route layer.
+    ``answers_json`` starts empty. The caller is responsible for the
+    "reuse existing in_progress session" logic (the route checks for
+    an open session before calling this).
+    """
+    session = models.DiagnosticSession(
+        id=session_id,
+        user_id=user_id,
+        status="in_progress",
+        answers_json=_serialize_answers({}),
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def get_diagnostic_session(
+    db: Session, session_id: str
+) -> Optional[models.DiagnosticSession]:
+    """Lookup a session by its UUID. Returns ``None`` if no row
+    matches. The route layer additionally checks ``user_id`` to
+    enforce per-user ownership (404 on a cross-user probe)."""
+    return (
+        db.query(models.DiagnosticSession)
+        .filter(models.DiagnosticSession.id == session_id)
+        .first()
+    )
+
+
+def list_diagnostic_sessions(
+    db: Session, user_id: int
+) -> list[models.DiagnosticSession]:
+    """Return all of a user's diagnostic sessions, newest first.
+
+    Used by ``POST /diagnostic/start`` to find an open
+    (``in_progress`` or ``completed``-but-not-``applied``) session to
+    resume instead of creating a duplicate.
+    """
+    return (
+        db.query(models.DiagnosticSession)
+        .filter(models.DiagnosticSession.user_id == user_id)
+        .order_by(models.DiagnosticSession.started_at.desc())
+        .all()
+    )
+
+
+def get_diagnostic_answers(
+    session: models.DiagnosticSession,
+) -> Dict[str, str]:
+    """Public hook: read the ``{question_id: choice_label}`` dict out
+    of a session row, hiding the storage dialect."""
+    return _deserialize_answers(session.answers_json)
+
+
+def record_diagnostic_answer(
+    db: Session,
+    session: models.DiagnosticSession,
+    question_id: str,
+    choice_label: str,
+) -> models.DiagnosticSession:
+    """Set ``answers_json[question_id] = choice_label`` and commit.
+
+    Idempotent per ``(session, question_id)`` — re-answering a
+    question overwrites the prior choice rather than appending. The
+    route validates ``question_id`` and ``choice_label`` against the
+    bank before calling this.
+
+    A fresh dict is built (not an in-place mutation) so the column
+    assignment changes object identity — without that, SQLAlchemy's
+    JSON column on Postgres wouldn't flag the row dirty and the
+    answer would silently not persist (the SQLite path masks this
+    because ``json.dumps`` yields a new string each time).
+    """
+    answers = dict(_deserialize_answers(session.answers_json))
+    answers[question_id] = choice_label
+    session.answers_json = _serialize_answers(answers)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def mark_diagnostic_session_status(
+    db: Session,
+    session: models.DiagnosticSession,
+    status: str,
+    *,
+    set_completed_at: bool = False,
+) -> models.DiagnosticSession:
+    """Update a session's ``status`` (and optionally stamp
+    ``completed_at=now``) and commit.
+
+    ``set_completed_at`` is True on the Apply path so the row records
+    when the probe was finalised into the weakness profile.
+    """
+    session.status = status
+    if set_completed_at:
+        session.completed_at = datetime.utcnow()
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Literal
 from app import auth, crud, models, schemas, anki_builder, bootstrap, retrieval
 from app.database import get_db, engine
+from app.diagnostic.routes import router as diagnostic_router
 from app.embeddings import embed_one, EmbeddingError
 from app.observability import _ensure_client, get_langfuse
 from app.passwords import hash_password
@@ -481,3 +482,25 @@ def write_weakness_profile(
         "axes": crud.serialize_weakness_profile_axes(profile),
         "updated_at": profile.updated_at,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.1 — Diagnostic probe router (card t_41d85c32)
+#
+# Four auth-gated routes mounted at the ``/diagnostic`` prefix:
+#   - POST /diagnostic/start   — create / resume a session, return the
+#                                stripped question bank.
+#   - POST /diagnostic/answer  — record one (question, choice) answer.
+#   - GET  /diagnostic/result  — recompute the deterministic score.
+#   - POST /diagnostic/apply   — UPSERT the score into the caller's
+#                                WeaknessProfile (existing helper).
+#
+# Handlers live in ``app.diagnostic.routes``. NO LLM call, NO Langfuse
+# tracing — the probe is fully deterministic. Existing endpoints stay
+# untouched and unauthenticated.
+# ---------------------------------------------------------------------------
+
+app.include_router(
+    diagnostic_router, prefix="/diagnostic", tags=["diagnostic"]
+)
+

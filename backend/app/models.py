@@ -154,6 +154,16 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    # Phase 3.1: one-to-many. A user can run the diagnostic probe
+    # multiple times (re-running after an ``applied`` session creates
+    # a fresh row). ``backref="user"`` gives ``DiagnosticSession.user``
+    # without a separate relationship declaration on that model.
+    # Cascade drops a user's sessions when the user is deleted.
+    diagnostic_sessions = relationship(
+        "DiagnosticSession",
+        backref="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class WeaknessProfile(Base):
@@ -197,3 +207,79 @@ class WeaknessProfile(Base):
     )
 
     user = relationship("User", back_populates="weakness_profile")
+
+
+class DiagnosticSession(Base):
+    """Phase 3 schema: one probe attempt per row.
+
+    A diagnostic session collects 10 multiple-choice answers from a
+    user about how comfortable they are with specific German
+    grammar axes (verbs, prepositions, collocations, ...). The
+    deterministic scorer in ``app.diagnostic.scoring`` consumes
+    the recorded ``answers_json`` and produces a 0..3 score per
+    axis; ``/diagnostic/apply`` UPSERTs the result into the user's
+    ``WeaknessProfile``.
+
+    Storage is dialect-aware (mirrors ``WeaknessProfile.axes``):
+
+    - Postgres: ``JSON`` column (the SA default maps to JSON on
+      modern PG). The route layer hands a dict in / out, the
+      CRUD layer is a no-op for the JSON shape.
+    - SQLite: ``Text`` storing JSON-encoded ``str(dict)``. The CRUD
+      helpers ``serialize_diagnostic_answers`` /
+      ``deserialize_diagnostic_answers`` hide the dialect.
+
+    Lifecycle:
+
+    - On ``POST /diagnostic/start`` a row is inserted with
+      ``status='in_progress'`` and ``answers_json={}``.
+    - Each ``POST /diagnostic/answer`` patches one
+      ``question_id -> choice_index`` entry.
+    - ``GET /diagnostic/result`` flips ``status`` to
+      ``'completed'`` on first read (idempotent — re-reads stay
+      ``completed``).
+    - ``POST /diagnostic/apply`` flips ``status`` to ``'applied'``
+      and UPSERTs the result into the user's
+      ``WeaknessProfile``.
+
+    The row is keyed by a UUID string (``id``) rather than an
+    autoincrement int so the client-side handle is opaque — no
+    enumeration of other users' sessions through sequential ids.
+    """
+
+    __tablename__ = "diagnostic_sessions"
+
+    # UUID stored as String(36) — portable across Postgres + SQLite
+    # without the ``pg uuid`` extension. The route layer mints via
+    # ``uuid.uuid4()``.
+    id = Column(String(36), primary_key=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True
+    )
+    started_at = Column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    # Nullable until the first ``/diagnostic/result`` call lands.
+    completed_at = Column(DateTime, nullable=True)
+    # Allowed values: ``in_progress | completed | applied | skipped``.
+    # A CHECK constraint on Postgres enforces the enum; the API
+    # layer validates values on write so a SQLite target is equally
+    # safe.
+    status = Column(
+        String(16),
+        nullable=False,
+        default="in_progress",
+        server_default="in_progress",
+    )
+    # Dialect-aware: JSON on Postgres, JSON-as-Text on SQLite.
+    # Both columns default to ``'{}'`` so a backfill row inserted
+    # by raw SQL still round-trips through the deserialization helper.
+    answers_json = (
+        Column(JSON, nullable=False, default=dict)
+        if _is_pg()
+        else Column(Text, nullable=False, default="{}")
+    )
+
+    # ``user`` is provided by the ``backref="user"`` on
+    # ``User.diagnostic_sessions`` (declared above) — no explicit
+    # relationship is declared here to avoid a name collision.
