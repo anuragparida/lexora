@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy import (
     Column,
     Integer,
@@ -8,6 +9,7 @@ from sqlalchemy import (
     Float,
     DateTime,
     LargeBinary,
+    JSON,
 )
 from sqlalchemy.orm import relationship
 from app.database import Base, DATABASE_URL
@@ -104,3 +106,94 @@ class FsrsCard(Base):
     state = Column(Integer)
     elapsed_days = Column(Integer)
     scheduled_days = Column(Integer)
+
+
+def _is_pg() -> bool:
+    """Dialect discriminator used by ``WeaknessProfile.axes``.
+
+    Mirrors the convention in ``app.database`` (DATABASE_URL is the single
+    source of truth). Returns True for any URL starting with
+    ``postgresql``; False for SQLite (the dev fallback) and any other
+    dialect. Phase 2.1 only ships the Postgres + SQLite pair — the
+    Postgres-vs-other branch in the migration handles future dialects.
+    """
+    return DATABASE_URL.startswith("postgresql")
+
+
+class User(Base):
+    """Phase 2 schema: a single learner account.
+
+    Phase 2.1 ships the data layer only — no auth. ``password_hash``
+    is intentionally ``nullable=False`` from the start (the
+    auth-free ``POST /users`` route accepts a pre-hashed value as
+    input for now). Phase 2.2 wires bcrypt + JWT on top via a
+    stricter write path (``/auth/signup`` hashes internally) — no
+    schema change needed there.
+
+    The relationship to ``WeaknessProfile`` is one-to-one with
+    cascade: deleting a user drops their profile. The profile is
+    not strictly required at signup time (the route auto-creates
+    an empty profile on first ``GET /weakness-profile/{user_id}``),
+    so a ``nullable=True`` relationship is unnecessary here — but
+    the SQLAlchemy relationship doesn't enforce presence.
+    """
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    # Raw hash lives here. Never returned in any response shape —
+    # ``schemas.UserOut`` does not expose this column. Phase 2.2
+    # wires hashing; this card only stores the value.
+    password_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    weakness_profile = relationship(
+        "WeaknessProfile",
+        uselist=False,
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class WeaknessProfile(Base):
+    """Phase 2 schema: per-user axes declaration (0-3 per axis).
+
+    The ``axes`` column stores a JSON object shaped like
+    ``{verbs: 2, collocations: 1, ...}``. The score scale is
+    0=unknown / 1=shaky / 2=developing / 3=critical (declared by
+    the user; the spec does not lock the meaning — the frontend
+    shows tick labels).
+
+    Storage is dialect-aware:
+    - Postgres: ``JSON`` (the SA default maps to JSON on modern
+      PG; for production we prefer JSONB but the spec card uses
+      ``JSON`` which is sufficient for read-write round-trips).
+    - SQLite: ``Text`` storing JSON-encoded ``str(dict)``. CRUD
+      helpers ``get_weakness_profile`` / ``upsert_weakness_profile``
+      hide the serialization so callers see a dict either way.
+    """
+
+    __tablename__ = "weakness_profiles"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True
+    )
+    # Note: ``default=dict`` only fires on Python-side INSERTs via
+    # SQLAlchemy. The Alembic migration sets ``server_default='{}'``
+    # for raw SQL inserts (e.g. backfill, manual psql). Both paths
+    # converge to the same shape.
+    axes = (
+        Column(JSON, nullable=False, default=dict)
+        if _is_pg()
+        else Column(Text, nullable=False, default="{}")
+    )
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    user = relationship("User", back_populates="weakness_profile")

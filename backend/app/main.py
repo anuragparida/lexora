@@ -277,3 +277,124 @@ def list_decks():
                     }
                 )
     return {"decks": sorted(decks, key=lambda x: x["created"], reverse=True)}
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.1 — User + WeaknessProfile routes (auth-free)
+#
+# Per card t_6318d0e1: these endpoints are intentionally OPEN. They
+# exist so Phase 2.2 can plug the JWT + bcrypt dependency on top via
+# a wrapping auth router — no schema or route contract rework needed.
+# DO NOT add bcrypt, JWT, or ``Depends(get_current_user)`` here.
+#
+# Existing endpoints (``/words``, ``/decks/generate``, etc.) stay
+# untouched and unauthenticated.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/users", response_model=schemas.UserOut, status_code=201)
+def create_user(
+    payload: schemas.UserCreate,
+    db: Session = Depends(get_db),
+):
+    """Create a new user row.
+
+    Accepts a raw ``password_hash`` for this card; Phase 2.2 wraps
+    this route with ``/auth/signup`` which hashes internally. A
+    duplicate email returns 409 — the IntegrityError on the unique
+    constraint is caught and translated.
+    """
+    # Pre-check is a fast path; the unique constraint is still the
+    # source of truth (avoids TOCTOU between two concurrent requests).
+    if crud.get_user_by_email(db, payload.email) is not None:
+        raise HTTPException(status_code=409, detail="email already registered")
+    try:
+        user = crud.create_user(db, email=payload.email, password_hash=payload.password_hash)
+    except IntegrityError:
+        # Lost the race against a concurrent INSERT with the same
+        # email — rollback and surface 409 with the same shape as
+        # the pre-check.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="email already registered")
+    return user
+
+
+@app.get("/users/me", status_code=501)
+def read_current_user():
+    """Placeholder for the authenticated ``/users/me`` endpoint.
+
+    Phase 2.2 replaces this with a real implementation that decodes
+    the JWT cookie (or Authorization header) and returns the current
+    user. For now this returns 501 with a body that explicitly
+    names the next card so a curl probe surfaces the reason rather
+    than a generic "method not implemented" message.
+
+    DO NOT delete this route in subsequent cards — Phase 2.2 will
+    replace the body with the real handler.
+    """
+    return {
+        "detail": "Phase 2.2 will implement /users/me via JWT decoding",
+        "card": "t_74c3aa1e",
+    }
+
+
+@app.get(
+    "/weakness-profile/{user_id}",
+    response_model=schemas.WeaknessProfileOut,
+)
+def read_weakness_profile(user_id: int, db: Session = Depends(get_db)):
+    """Return the weakness profile for a user.
+
+    Auto-creates an empty default profile on first read so a fresh
+    user always sees a stable response shape. Returns 404 if the
+    user_id doesn't exist (the user must already exist before a
+    profile can be created — the ``/users`` POST is the entry point).
+
+    No auth check — Phase 2.2 adds ``Depends(get_current_user)`` and
+    verifies the JWT subject matches ``user_id``.
+    """
+    if crud.get_user_by_id(db, user_id) is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    profile = crud.get_weakness_profile(db, user_id)
+    if profile is None:
+        profile = crud.create_empty_weakness_profile(db, user_id)
+    # Build the response dict directly so the dialect-aware ``axes``
+    # deserialization (JSON on Postgres, JSON string on SQLite)
+    # produces a dict on the wire. The Pydantic model expects a
+    # dict-shaped ``axes`` field, so we cannot rely on
+    # ``from_attributes`` alone for this column.
+    return {
+        "id": profile.id,
+        "user_id": profile.user_id,
+        "axes": crud.serialize_weakness_profile_axes(profile),
+        "updated_at": profile.updated_at,
+    }
+
+
+@app.put(
+    "/weakness-profile/{user_id}",
+    response_model=schemas.WeaknessProfileOut,
+)
+def write_weakness_profile(
+    user_id: int,
+    payload: schemas.WeaknessProfileUpdate,
+    db: Session = Depends(get_db),
+):
+    """Upsert the weakness profile for a user.
+
+    The ``WeaknessProfileUpdate`` Pydantic model already validates
+    ``axes`` (each value must be an int in [0, 3]) so a 422 surfaces
+    on bad input. Returns 404 if the user_id doesn't exist.
+
+    No auth check — Phase 2.2 gates this route via
+    ``Depends(get_current_user)``.
+    """
+    if crud.get_user_by_id(db, user_id) is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    profile = crud.upsert_weakness_profile(db, user_id, payload.axes)
+    return {
+        "id": profile.id,
+        "user_id": profile.user_id,
+        "axes": crud.serialize_weakness_profile_axes(profile),
+        "updated_at": profile.updated_at,
+    }
