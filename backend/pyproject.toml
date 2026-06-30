@@ -17,6 +17,16 @@ dependencies = [
     "pgvector>=0.3.6",
     "pytest>=8.3.0",
     "respx>=0.21.0",
+    # Phase 2.2 — auth (card t_74c3aa1e). bcrypt password hashing
+    # (direct — passlib 1.7.4 is incompatible with bcrypt 5.x on its
+    # wrap-bug detection probe; we just use the bcrypt module's
+    # gensalt + hashpw + checkpw with rounds=12 explicit), JWT
+    # (HS256) cookie issuance + verification, multipart form parsing.
+    "bcrypt>=4.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "python-multipart>=0.0.12",
+    # pydantic[email] enables EmailStr on auth request bodies.
+    "email-validator>=2.2.0",
 ]
 
 [tool.uv]

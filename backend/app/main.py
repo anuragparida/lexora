@@ -2,14 +2,16 @@ import os
 import logging
 import time
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional, Literal
-from app import crud, models, schemas, anki_builder, bootstrap, retrieval
+from app import auth, crud, models, schemas, anki_builder, bootstrap, retrieval
 from app.database import get_db, engine
 from app.embeddings import embed_one, EmbeddingError
 from app.observability import _ensure_client, get_langfuse
+from app.passwords import hash_password
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("lexora.main")
@@ -280,89 +282,164 @@ def list_decks():
 
 
 # ---------------------------------------------------------------------------
-# Phase 2.1 — User + WeaknessProfile routes (auth-free)
+# Phase 2.2 — Auth + gated weakness-profile routes (card t_74c3aa1e)
 #
-# Per card t_6318d0e1: these endpoints are intentionally OPEN. They
-# exist so Phase 2.2 can plug the JWT + bcrypt dependency on top via
-# a wrapping auth router — no schema or route contract rework needed.
-# DO NOT add bcrypt, JWT, or ``Depends(get_current_user)`` here.
+# Replaces the Phase 2.1 routes:
+#   - ``POST /users`` (raw ``password_hash``)  →  ``POST /auth/signup`` (bcrypt)
+#   - ``GET /users/me`` (501 placeholder)      →  ``GET /auth/me`` (JWT decode)
+#   - ``GET/PUT /weakness-profile/{user_id}``  →  same routes, now auth-gated
 #
-# Existing endpoints (``/words``, ``/decks/generate``, etc.) stay
-# untouched and unauthenticated.
+# New surface added in this card:
+#   - ``POST /auth/signup`` — bcrypt hash, issue JWT cookie, return
+#     ``{access_token, user}``.
+#   - ``POST /auth/login``  — verify bcrypt, issue JWT cookie.
+#   - ``POST /auth/logout`` — clear the cookie. 204.
+#   - ``GET  /auth/me``     — decode cookie or Bearer header, return
+#     the ``User`` row.
+#
+# Existing endpoints (``/words``, ``/decks/generate``, ``/retrieve``,
+# etc.) stay untouched and unauthenticated. Only ``/auth/*`` and
+# ``/weakness-profile/*`` route through ``get_current_user``.
 # ---------------------------------------------------------------------------
 
 
-@app.post("/users", response_model=schemas.UserOut, status_code=201)
-def create_user(
-    payload: schemas.UserCreate,
+def _issue_token_and_respond(
+    user: models.User, db: Session
+) -> schemas.AuthResponse:
+    """Mint a JWT for the user and shape the response body.
+
+    The cookie is set as a side-effect on the FastAPI ``Response``
+    by the route — this helper only builds the body so a future
+    caller (e.g. a CLI script) can reuse the auth shape without
+    needing a Response object.
+    """
+    token = auth.create_access_token(user.id)
+    user_out = schemas.UserOut.model_validate(user)
+    return schemas.AuthResponse(access_token=token, user=user_out)
+
+
+@app.post(
+    "/auth/signup",
+    response_model=schemas.AuthResponse,
+    status_code=201,
+)
+def signup(
+    payload: schemas.SignupRequest,
+    response: Response,
     db: Session = Depends(get_db),
 ):
-    """Create a new user row.
+    """Create a new user, hash the password with bcrypt, issue a
+    JWT cookie, return ``{access_token, user}``.
 
-    Accepts a raw ``password_hash`` for this card; Phase 2.2 wraps
-    this route with ``/auth/signup`` which hashes internally. A
-    duplicate email returns 409 — the IntegrityError on the unique
-    constraint is caught and translated.
+    Duplicate emails return 409 (pre-check + IntegrityError
+    fallback, same shape). Email format is validated by
+    ``EmailStr`` (Pydantic); password length is validated by the
+    field bounds ``[8, 128]``. 422 on either failure.
     """
-    # Pre-check is a fast path; the unique constraint is still the
-    # source of truth (avoids TOCTOU between two concurrent requests).
+    # Pre-check the email — fast path. The unique constraint is
+    # still the source of truth so two concurrent signups with the
+    # same email both surface 409 cleanly.
     if crud.get_user_by_email(db, payload.email) is not None:
         raise HTTPException(status_code=409, detail="email already registered")
+    pw_hash = hash_password(payload.password)
     try:
-        user = crud.create_user(db, email=payload.email, password_hash=payload.password_hash)
+        user = crud.create_user(
+            db, email=payload.email, password_hash=pw_hash
+        )
     except IntegrityError:
-        # Lost the race against a concurrent INSERT with the same
-        # email — rollback and surface 409 with the same shape as
-        # the pre-check.
+        # Concurrent insert beat us to it. Roll back the in-flight
+        # session and surface the same 409 the pre-check would have.
         db.rollback()
         raise HTTPException(status_code=409, detail="email already registered")
-    return user
+
+    auth.set_auth_cookie(response, auth.create_access_token(user.id))
+    return _issue_token_and_respond(user, db)
 
 
-@app.get("/users/me", status_code=501)
-def read_current_user():
-    """Placeholder for the authenticated ``/users/me`` endpoint.
+@app.post(
+    "/auth/login",
+    response_model=schemas.AuthResponse,
+)
+def login(
+    payload: schemas.LoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Verify the (email, password) pair and issue a JWT cookie.
 
-    Phase 2.2 replaces this with a real implementation that decodes
-    the JWT cookie (or Authorization header) and returns the current
-    user. For now this returns 501 with a body that explicitly
-    names the next card so a curl probe surfaces the reason rather
-    than a generic "method not implemented" message.
-
-    DO NOT delete this route in subsequent cards — Phase 2.2 will
-    replace the body with the real handler.
+    Returns 401 on any failure — the response body does not
+    distinguish "no such email" from "wrong password" so a
+    username-enumeration probe gets the same shape either way.
     """
-    return {
-        "detail": "Phase 2.2 will implement /users/me via JWT decoding",
-        "card": "t_74c3aa1e",
-    }
+    user = crud.authenticate_user(db, payload.email, payload.password)
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid credentials",
+        )
+    auth.set_auth_cookie(response, auth.create_access_token(user.id))
+    return _issue_token_and_respond(user, db)
+
+
+@app.post("/auth/logout", status_code=204)
+def logout(response: Response):
+    """Clear the ``lexora_token`` cookie. Always 204 — logout
+    is idempotent (a second logout is a no-op).
+
+    Note: the route MUST return the injected ``response`` itself
+    (not a fresh ``Response(status_code=204)``) — FastAPI's
+    response-cycle replaces the response object on return, and a
+    fresh response would drop the Set-Cookie header that
+    ``clear_auth_cookie`` just added.
+    """
+    auth.clear_auth_cookie(response)
+    response.status_code = 204
+    return response
+
+
+@app.get("/auth/me", response_model=schemas.UserOut)
+def read_me(
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Return the authenticated user. 401 if no / invalid / expired
+    token (raised by the dependency, same opaque shape for all
+    failure modes).
+    """
+    return current_user
 
 
 @app.get(
     "/weakness-profile/{user_id}",
     response_model=schemas.WeaknessProfileOut,
 )
-def read_weakness_profile(user_id: int, db: Session = Depends(get_db)):
+def read_weakness_profile(
+    user_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
     """Return the weakness profile for a user.
 
-    Auto-creates an empty default profile on first read so a fresh
-    user always sees a stable response shape. Returns 404 if the
-    user_id doesn't exist (the user must already exist before a
-    profile can be created — the ``/users`` POST is the entry point).
+    Phase 2.2 auth: the caller must be authenticated. The JWT
+    subject (``current_user.id``) must match ``user_id`` — a
+    logged-in user can only read their own profile, and probing
+    another user's ``user_id`` returns 403.
 
-    No auth check — Phase 2.2 adds ``Depends(get_current_user)`` and
-    verifies the JWT subject matches ``user_id``.
+    Auto-creates an empty default profile on first read so a
+    fresh user always sees a stable response shape. Returns 404
+    if the user_id doesn't exist (defence in depth — the
+    dependency already verified ``current_user.id`` is a real
+    row, but the route guards in case the URL parameter is
+    edited by hand).
     """
+    if current_user.id != user_id:
+        raise HTTPException(
+            status_code=403, detail="cannot read another user's profile"
+        )
     if crud.get_user_by_id(db, user_id) is None:
         raise HTTPException(status_code=404, detail="user not found")
     profile = crud.get_weakness_profile(db, user_id)
     if profile is None:
         profile = crud.create_empty_weakness_profile(db, user_id)
-    # Build the response dict directly so the dialect-aware ``axes``
-    # deserialization (JSON on Postgres, JSON string on SQLite)
-    # produces a dict on the wire. The Pydantic model expects a
-    # dict-shaped ``axes`` field, so we cannot rely on
-    # ``from_attributes`` alone for this column.
     return {
         "id": profile.id,
         "user_id": profile.user_id,
@@ -378,17 +455,23 @@ def read_weakness_profile(user_id: int, db: Session = Depends(get_db)):
 def write_weakness_profile(
     user_id: int,
     payload: schemas.WeaknessProfileUpdate,
+    current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
     """Upsert the weakness profile for a user.
 
+    Phase 2.2 auth: same as ``GET /weakness-profile/{user_id}``.
     The ``WeaknessProfileUpdate`` Pydantic model already validates
-    ``axes`` (each value must be an int in [0, 3]) so a 422 surfaces
-    on bad input. Returns 404 if the user_id doesn't exist.
-
-    No auth check — Phase 2.2 gates this route via
-    ``Depends(get_current_user)``.
+    ``axes`` (each value must be an int in [0, 3]) so a 422
+    surfaces on bad input. Returns 404 if the user_id doesn't
+    exist (defence in depth — the dependency verified
+    ``current_user.id`` is real, but the route guards against
+    hand-edited URLs).
     """
+    if current_user.id != user_id:
+        raise HTTPException(
+            status_code=403, detail="cannot write another user's profile"
+        )
     if crud.get_user_by_id(db, user_id) is None:
         raise HTTPException(status_code=404, detail="user not found")
     profile = crud.upsert_weakness_profile(db, user_id, payload.axes)

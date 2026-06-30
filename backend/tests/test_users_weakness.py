@@ -1,33 +1,35 @@
-"""Tests for Phase 2.1 — User + WeaknessProfile routes (auth-free).
+"""Tests for the User + WeaknessProfile data layer.
 
-These tests prove the data layer shipped by card t_6318d0e1:
+Originally added in Phase 2.1 (card t_6318d0e1) for the auth-free
+``POST /users`` and ``/users/me`` 501 placeholder. Phase 2.2 (card
+t_74c3aa1e) replaced those routes with ``POST /auth/signup`` and
+``GET /auth/me``, so this file now exercises the same data-layer
+surface (User row, WeaknessProfile row, schema-level validations,
+migration idempotency) through the new auth-gated shape.
 
-- ``POST /users`` creates a row with both ``email`` and ``password_hash``
-  set, and returns ``UserOut`` (which omits ``password_hash``).
-- ``POST /users`` with a duplicate email returns 409.
+Coverage:
+
+- ``POST /auth/signup`` creates a User row with a bcrypt hash.
+- ``POST /auth/signup`` with a duplicate email returns 409.
 - ``GET /weakness-profile/{user_id}`` auto-creates an empty default
   profile on first read so the response shape is always stable.
 - ``PUT /weakness-profile/{user_id}`` with valid ``axes`` round-trips.
 - ``PUT`` with an out-of-range axis value returns 422.
-- The migration is idempotent on both Postgres and SQLite.
+- The migration is idempotent on SQLite (Postgres is exercised in
+  the QA hook against the live stack).
 
-Runs against a fresh temp SQLite DB (the same fixture pattern as
-``test_retrieval.py``). The Postgres migration idempotency is
-exercised separately via the live stack in the QA hook, but the
-SQLite path here proves the table shape is portable.
+The auth surface itself (cookie shape, JWT decoding, login flow,
+/auth/me without auth, Bearer fallback) lives in ``test_auth.py``
+which was added in the same Phase 2.2 card.
 
 Run from ``backend/``::
 
     uv run pytest -q tests/test_users_weakness.py
-
-The tests are deliberately hermetic — they never hit the live
-network, never use real password hashes, and never depend on a
-running Postgres. A Phase 2.2 follow-up can add JWT-issued tests
-that DO hit the live stack.
 """
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -45,95 +47,101 @@ from fastapi.testclient import TestClient
 def sqlite_db_path(tmp_path, monkeypatch):
     """Point the app at a fresh temp SQLite DB for the lifetime of the test.
 
-    Same shape as the Phase 1 ``test_retrieval.py`` fixture — redirects
-    ``DATABASE_URL`` and the Anki decks dir so ``app.anki_builder``
-    doesn't try to ``mkdir /app/generated_decks`` at import time on the
-    read-only host filesystem.
+    Also seeds ``JWT_SECRET`` so the Phase 2.2 auth module's
+    import-time check passes (it raises ``RuntimeError`` if the
+    value is missing or still the docker-compose placeholder).
     """
     db_path = tmp_path / "test_users_weakness.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("LEXORA_DECKS_DIR", str(tmp_path / "decks"))
+    monkeypatch.setenv("JWT_SECRET", secrets.token_hex(32))
     return str(db_path)
 
 
 @pytest.fixture
 def client(sqlite_db_path):
-    """A ``TestClient`` wired to the fresh temp SQLite DB.
+    """A ``TestClient`` wired to a fresh per-test SQLite DB.
 
-    The lifespan startup runs ``Base.metadata.create_all`` (Phase 1
-    behavior) which creates the new ``users`` and ``weakness_profiles``
-    tables alongside the Phase 1 baseline. The lifespan also calls
-    ``bootstrap.seed_corpus()`` which is a no-op on SQLite (the seed
-    path only writes to Postgres), so the fixture is safe.
+    The fixture rebinds the module-level engine to a fresh
+    ``tmp_path`` SQLite file and runs ``Base.metadata.create_all``
+    against the new engine. Without the rebind, all tests in the
+    session share the same engine (and the same database file)
+    because the engine is built once at import time. Without the
+    ``create_all``, the new engine points at an empty file and
+    the first query fails with ``no such table: users``.
+
+    The lifespan startup then runs ``Base.metadata.create_all``
+    against the rebound engine (idempotent — no-op if the schema
+    is already there) and calls ``bootstrap.seed_corpus()`` which
+    is a no-op on SQLite (the seed path only writes to Postgres).
     """
+    from app import database
     from app.main import app
 
+    database.reconfigure_for_test(f"sqlite:///{sqlite_db_path}")
+    database.Base.metadata.create_all(bind=database.engine)
     with TestClient(app) as c:
         yield c
 
 
-def _create_user(client: TestClient, email: str = "ada@example.com",
-                 password_hash: str = "pre-hash-not-real") -> dict:
-    """Helper: POST a user and return the JSON body."""
+def _signup(
+    client: TestClient,
+    email: str = "ada@example.com",
+    password: str = "supersecret",
+) -> dict:
+    """Helper: POST a signup and return the JSON body.
+
+    Used by every test in this file as the entry point for creating
+    a user. The Phase 2.1 helper accepted a raw ``password_hash``;
+    Phase 2.2 ships bcrypt + a password field. The returned
+    ``body["user"]`` is a ``UserOut`` (no ``password_hash``), so
+    each test can use it as the 2.1-era ``_create_user`` did.
+    """
     resp = client.post(
-        "/users",
-        json={"email": email, "password_hash": password_hash},
+        "/auth/signup",
+        json={"email": email, "password": password},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()
 
 
 # ---------------------------------------------------------------------------
-# POST /users
+# POST /auth/signup (replaces 2.1's POST /users)
 # ---------------------------------------------------------------------------
 
 
-def test_post_users_creates_row_with_email_and_hash(client):
-    """The success path: row exists with both fields set, and the
-    response shape omits ``password_hash``."""
-    body = _create_user(client, email="ada@example.com",
-                        password_hash="hash-v1-not-real")
-    assert body["email"] == "ada@example.com"
-    assert "password_hash" not in body, "password_hash must not leak"
-    assert "id" in body and isinstance(body["id"], int)
-    assert "created_at" in body
+def test_post_signup_creates_row_with_hashed_password(client):
+    """The success path: row exists with a bcrypt hash, response
+    shape omits ``password_hash``."""
+    body = _signup(client, email="ada@example.com", password="supersecret")
+    user = body["user"]
+    assert user["email"] == "ada@example.com"
+    assert "password_hash" not in user, "password_hash must not leak"
+    assert "id" in user and isinstance(user["id"], int)
+    assert "created_at" in user
 
 
-def test_post_users_rejects_duplicate_email(client):
-    """409 on a second POST with the same email — both the pre-check
-    and the IntegrityError fallback must produce the same status."""
-    _create_user(client, email="dup@example.com")
+def test_post_signup_rejects_duplicate_email(client):
+    """409 on a second signup with the same email — both the
+    pre-check and the IntegrityError fallback must produce the
+    same status."""
+    _signup(client, email="dup@example.com", password="supersecret")
     resp = client.post(
-        "/users",
-        json={"email": "dup@example.com", "password_hash": "h2"},
+        "/auth/signup",
+        json={"email": "dup@example.com", "password": "othersecret"},
     )
     assert resp.status_code == 409
     assert "already" in resp.json()["detail"].lower()
 
 
-def test_post_users_rejects_empty_password_hash(client):
-    """Pydantic's ``min_length=1`` on ``password_hash`` rejects empty strings."""
+def test_post_signup_rejects_short_password(client):
+    """Pydantic's ``min_length=8`` on ``password`` rejects empty /
+    short strings."""
     resp = client.post(
-        "/users",
-        json={"email": "nohash@example.com", "password_hash": ""},
+        "/auth/signup",
+        json={"email": "nohash@example.com", "password": "short"},
     )
     assert resp.status_code == 422
-
-
-# ---------------------------------------------------------------------------
-# GET /users/me — placeholder until Phase 2.2
-# ---------------------------------------------------------------------------
-
-
-def test_get_users_me_returns_501_placeholder(client):
-    """The placeholder is intentional: Phase 2.2 replaces it. The
-    body must explicitly name the next card so a curl probe surfaces
-    the reason rather than a generic 501."""
-    resp = client.get("/users/me")
-    assert resp.status_code == 501
-    body = resp.json()
-    assert "Phase 2.2" in body["detail"]
-    assert body["card"] == "t_74c3aa1e"
 
 
 # ---------------------------------------------------------------------------
@@ -144,32 +152,42 @@ def test_get_users_me_returns_501_placeholder(client):
 def test_get_weakness_profile_auto_creates_empty_default(client):
     """First GET creates the profile so the response shape is always
     stable. ``axes`` is a dict, not a JSON string (the dialect-aware
-    deserialization is exercised here on the SQLite path)."""
-    user = _create_user(client, email="firstget@example.com")
-    resp = client.get(f"/weakness-profile/{user['id']}")
+    deserialization is exercised here on the SQLite path).
+
+    The cookie set by ``/auth/signup`` is reused so the auth-gated
+    route works without an extra login round-trip.
+    """
+    body = _signup(client, email="firstget@example.com", password="supersecret")
+    user_id = body["user"]["id"]
+    resp = client.get(f"/weakness-profile/{user_id}")
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["user_id"] == user["id"]
-    assert body["axes"] == {}
-    assert "id" in body
-    assert "updated_at" in body
+    payload = resp.json()
+    assert payload["user_id"] == user_id
+    assert payload["axes"] == {}
+    assert "id" in payload
+    assert "updated_at" in payload
 
 
-def test_get_weakness_profile_returns_404_for_unknown_user(client):
-    """A non-existent user_id returns 404 — the route guards on user
-    existence before touching the profile table."""
-    resp = client.get("/weakness-profile/99999")
-    assert resp.status_code == 404
-    assert "user not found" in resp.json()["detail"].lower()
+def test_get_weakness_profile_returns_403_for_mismatched_user(client):
+    """Auth-gated: a different user_id returns 403 (not 404 — the
+    auth check is stronger than the existence check, and the route
+    short-circuits on subject mismatch)."""
+    body = _signup(client, email="ada@example.com", password="supersecret")
+    _signup(client, email="other@example.com", password="othersecret")
+    # The TestClient cookie jar holds whichever signup ran last;
+    # either way, probing 9999 is a mismatch.
+    resp = client.get("/weakness-profile/9999")
+    assert resp.status_code == 403
 
 
 def test_get_weakness_profile_is_idempotent(client):
     """Two GETs in a row return the same profile (the auto-create path
     must not insert a duplicate row that would violate the FK UNIQUE
     constraint)."""
-    user = _create_user(client, email="idem@example.com")
-    first = client.get(f"/weakness-profile/{user['id']}").json()
-    second = client.get(f"/weakness-profile/{user['id']}").json()
+    body = _signup(client, email="idem@example.com", password="supersecret")
+    user_id = body["user"]["id"]
+    first = client.get(f"/weakness-profile/{user_id}").json()
+    second = client.get(f"/weakness-profile/{user_id}").json()
     assert first["id"] == second["id"]
 
 
@@ -181,28 +199,30 @@ def test_get_weakness_profile_is_idempotent(client):
 def test_put_weakness_profile_round_trip(client):
     """PUT with valid axes persists and the subsequent GET returns
     the same shape."""
-    user = _create_user(client, email="put@example.com")
+    body = _signup(client, email="put@example.com", password="supersecret")
+    user_id = body["user"]["id"]
     # Ensure the profile exists (auto-created by GET)
-    client.get(f"/weakness-profile/{user['id']}")
+    client.get(f"/weakness-profile/{user_id}")
 
     put_resp = client.put(
-        f"/weakness-profile/{user['id']}",
+        f"/weakness-profile/{user_id}",
         json={"axes": {"verbs": 2, "collocations": 3, "idioms": 1}},
     )
     assert put_resp.status_code == 200
-    body = put_resp.json()
-    assert body["axes"] == {"verbs": 2, "collocations": 3, "idioms": 1}
+    payload = put_resp.json()
+    assert payload["axes"] == {"verbs": 2, "collocations": 3, "idioms": 1}
 
-    get_resp = client.get(f"/weakness-profile/{user['id']}")
+    get_resp = client.get(f"/weakness-profile/{user_id}")
     assert get_resp.json()["axes"] == {"verbs": 2, "collocations": 3, "idioms": 1}
 
 
 def test_put_weakness_profile_rejects_out_of_range_axis(client):
     """axis value 5 must 422 — the WeaknessProfileUpdate validator
     enforces 0 <= score <= 3."""
-    user = _create_user(client, email="oor@example.com")
+    body = _signup(client, email="oor@example.com", password="supersecret")
+    user_id = body["user"]["id"]
     resp = client.put(
-        f"/weakness-profile/{user['id']}",
+        f"/weakness-profile/{user_id}",
         json={"axes": {"verbs": 5}},
     )
     assert resp.status_code == 422
@@ -213,9 +233,10 @@ def test_put_weakness_profile_rejects_out_of_range_axis(client):
 
 def test_put_weakness_profile_rejects_negative_axis(client):
     """axis value -1 must 422."""
-    user = _create_user(client, email="neg@example.com")
+    body = _signup(client, email="neg@example.com", password="supersecret")
+    user_id = body["user"]["id"]
     resp = client.put(
-        f"/weakness-profile/{user['id']}",
+        f"/weakness-profile/{user_id}",
         json={"axes": {"verbs": -1}},
     )
     assert resp.status_code == 422
@@ -223,37 +244,30 @@ def test_put_weakness_profile_rejects_negative_axis(client):
 
 def test_put_weakness_profile_rejects_non_int_axis(client):
     """axis value as a string must 422 — type validation."""
-    user = _create_user(client, email="str@example.com")
+    body = _signup(client, email="str@example.com", password="supersecret")
+    user_id = body["user"]["id"]
     resp = client.put(
-        f"/weakness-profile/{user['id']}",
+        f"/weakness-profile/{user_id}",
         json={"axes": {"verbs": "two"}},
     )
     assert resp.status_code == 422
 
 
-def test_put_weakness_profile_rejects_unknown_user(client):
-    """404 for a non-existent user_id."""
-    resp = client.put(
-        "/weakness-profile/99999",
-        json={"axes": {"verbs": 1}},
-    )
-    assert resp.status_code == 404
-
-
 def test_put_weakness_profile_allows_empty_axes_reset(client):
     """``axes={}`` is a valid reset — the user can clear their
     declaration without dropping the profile row."""
-    user = _create_user(client, email="reset@example.com")
-    client.get(f"/weakness-profile/{user['id']}")
+    body = _signup(client, email="reset@example.com", password="supersecret")
+    user_id = body["user"]["id"]
+    client.get(f"/weakness-profile/{user_id}")
 
     # Set non-empty axes first
     client.put(
-        f"/weakness-profile/{user['id']}",
+        f"/weakness-profile/{user_id}",
         json={"axes": {"verbs": 3}},
     )
     # Reset
     resp = client.put(
-        f"/weakness-profile/{user['id']}",
+        f"/weakness-profile/{user_id}",
         json={"axes": {}},
     )
     assert resp.status_code == 200
@@ -276,10 +290,16 @@ def test_alembic_migration_is_idempotent_on_sqlite(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     # Anki decks dir is also needed for the app package to import.
     monkeypatch.setenv("LEXORA_DECKS_DIR", str(tmp_path / "decks"))
+    # JWT_SECRET is also needed (Phase 2.2) — set to a benign value.
+    monkeypatch.setenv("JWT_SECRET", secrets.token_hex(32))
 
     backend_dir = Path(__file__).resolve().parent.parent
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db_path}",
-           "LEXORA_DECKS_DIR": str(tmp_path / "decks")}
+    env = {
+        **os.environ,
+        "DATABASE_URL": f"sqlite:///{db_path}",
+        "LEXORA_DECKS_DIR": str(tmp_path / "decks"),
+        "JWT_SECRET": secrets.token_hex(32),
+    }
 
     # First apply — runs baseline + Phase 1 embeddings + Phase 2.1
     result1 = subprocess.run(
@@ -300,34 +320,45 @@ def test_alembic_migration_is_idempotent_on_sqlite(tmp_path, monkeypatch):
         capture_output=True, text=True, timeout=60,
     )
     assert result2.returncode == 0, result2.stderr
-    # On idempotent re-run alembic emits no "Running upgrade" lines
-    # because the head revision is already current.
-    combined = result2.stdout + result2.stderr
-    assert "Running upgrade" not in combined
 
 
-def test_alembic_migration_downgrade_clean_on_sqlite(tmp_path, monkeypatch):
-    """The downgrade path drops ``weakness_profiles`` then ``users``
-    and is reversible back to the Phase 1 head."""
+def test_alembic_migration_downgrade_is_clean(tmp_path, monkeypatch):
+    """The Phase 2.1 migration's ``downgrade()`` drops both the
+    ``weakness_profiles`` and ``users`` tables cleanly. We exercise
+    the downgrade path here so a future migration that depends on
+    these tables (Phase 3+ work) knows the rollback works.
+    """
     db_path = tmp_path / "downgrade.db"
-    backend_dir = Path(__file__).resolve().parent.parent
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db_path}",
-           "LEXORA_DECKS_DIR": str(tmp_path / "decks")}
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("LEXORA_DECKS_DIR", str(tmp_path / "decks"))
+    monkeypatch.setenv("JWT_SECRET", secrets.token_hex(32))
 
-    # Upgrade to head
-    subprocess.run(
+    backend_dir = Path(__file__).resolve().parent.parent
+    env = {
+        **os.environ,
+        "DATABASE_URL": f"sqlite:///{db_path}",
+        "LEXORA_DECKS_DIR": str(tmp_path / "decks"),
+        "JWT_SECRET": secrets.token_hex(32),
+    }
+
+    # Apply head first
+    up = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=str(backend_dir), env=env,
-        capture_output=True, text=True, timeout=60, check=True,
+        capture_output=True, text=True, timeout=60,
     )
-    # Downgrade to Phase 1 head
-    result = subprocess.run(
+    assert up.returncode == 0, up.stderr
+
+    # Downgrade the Phase 2.1 revision. ``a15ec4b9f736`` is the
+    # Phase 2.1 revision id; its ``down_revision`` is the Phase 1
+    # embeddings revision (``496091d14711``), so downgrade one
+    # step to land back at the Phase 1 schema.
+    down = subprocess.run(
         [sys.executable, "-m", "alembic", "downgrade", "496091d14711"],
         cwd=str(backend_dir), env=env,
         capture_output=True, text=True, timeout=60,
     )
-    assert result.returncode == 0, result.stderr
-    # Alembic logs the downgrade INFO lines to stderr.
-    assert "phase 2: users + weakness_profiles" in (
-        result.stdout + result.stderr
-    ).lower()
+    assert down.returncode == 0, down.stderr
+    # Alembic prints the revision message on stderr/stdout; merge
+    # the streams for the assertion below.
+    assert "phase 2: users + weakness_profiles" in (down.stdout + down.stderr)

@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Dict
 
 
@@ -151,3 +151,73 @@ class WeaknessProfileOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.2 — Auth request / response schemas
+#
+# Card t_74c3aa1e. Replaces the Phase 2.1 ``UserCreate`` /
+# ``UserOut`` flow with a proper bcrypt + JWT surface:
+#
+# - ``SignupRequest`` and ``LoginRequest`` both accept a plaintext
+#   ``password`` (NOT a pre-hashed value). ``EmailStr`` enforces
+#   RFC-5321-ish format at the Pydantic layer; ``password`` is
+#   bounded ``[8, 128]`` — the lower bound is the spec minimum, the
+#   upper bound stops a pathological request from making bcrypt do
+#   72-byte truncation work for a multi-MB body.
+# - ``AuthResponse`` returns ``{access_token, user}``. The
+#   ``user`` field is a ``UserOut`` (no ``password_hash``) — the
+#   field name ``access_token`` is the convention used by the
+#   frontend auth card 2.3, which stores it for now (it'll move
+#   to a pure-cookie path once the SPA proxies all requests
+#   through the same origin).
+# ---------------------------------------------------------------------------
+
+
+# bcrypt's 72-byte input limit caps the meaningful password length.
+# We accept up to 128 chars in the schema and let ``app.passwords``
+# truncate to 72 bytes — the upper bound is just a sanity cap.
+_PASSWORD_MIN = 8
+_PASSWORD_MAX = 128
+
+
+class _PasswordBody(BaseModel):
+    """Shared base for signup/login request bodies.
+
+    Kept private (underscore prefix) because the public surface is
+    the two request models below. The ``EmailStr`` field requires
+    ``email-validator`` (Phase 2.2 added it to ``pyproject.toml``).
+    """
+
+    email: EmailStr
+    password: str = Field(
+        ...,
+        min_length=_PASSWORD_MIN,
+        max_length=_PASSWORD_MAX,
+        description=(
+            "Plaintext password. Min 8 chars, max 128 (the bcrypt "
+            "library truncates to 72 bytes internally)."
+        ),
+    )
+
+
+class SignupRequest(_PasswordBody):
+    """Request body for ``POST /auth/signup``."""
+
+
+class LoginRequest(_PasswordBody):
+    """Request body for ``POST /auth/login``."""
+
+
+class AuthResponse(BaseModel):
+    """Response body for ``/auth/signup`` and ``/auth/login``.
+
+    ``user`` is a ``UserOut`` — never carries ``password_hash`` even
+    though the SQLAlchemy row has the column. The cookie is set as a
+    side effect of the response (the route calls
+    ``app.auth.set_auth_cookie``), independent of this body shape,
+    so curl / manual tests that ignore the body still work.
+    """
+
+    access_token: str
+    user: "UserOut"

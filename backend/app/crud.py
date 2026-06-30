@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app import models
 from app.models import _is_pg
+from app.passwords import verify_password
 
 
 def get_words(
@@ -132,6 +133,38 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[models.User]:
     into a 404.
     """
     return db.query(models.User).filter(models.User.id == user_id).first()
+
+
+def authenticate_user(
+    db: Session, email: str, password: str
+) -> Optional[models.User]:
+    """Phase 2.2 — verify a (email, password) pair and return the
+    ``User`` row on success, ``None`` on any failure.
+
+    Constant-time on the bcrypt side (``bcrypt.checkpw``); the
+    pre-lookup by email is a regular index hit. A 401 on this
+    function's ``None`` return must not leak which of email vs
+    password was wrong — the spec calls that out explicitly. The
+    function itself just returns ``None`` for "not found" and
+    ``None`` for "wrong password"; the route layer does not
+    distinguish.
+
+    A malformed hash row (the verify call raises) is also mapped
+    to ``None`` so a probe cannot tell "row exists with broken
+    hash" apart from "no row at all".
+    """
+    user = get_user_by_email(db, email)
+    if user is None:
+        # Run a verify against a dummy hash so the time cost of a
+        # missing email roughly matches the time cost of a wrong
+        # password. This is a low-impact timing equaliser — not
+        # cryptographic — and avoids the trivial "look the email
+        # up first, no row → fast 401" username-enumeration path.
+        verify_password(password, "$2b$12$" + "x" * 53)
+        return None
+    if not verify_password(password, user.password_hash):
+        return None
+    return user
 
 
 def create_user(db: Session, email: str, password_hash: str) -> models.User:
