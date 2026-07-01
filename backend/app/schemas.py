@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Literal
 
 
 class VerbConjugationBase(BaseModel):
@@ -310,3 +310,64 @@ class DiagnosticApplyIn(BaseModel):
     computed result to UPSERT into the caller's weakness profile."""
 
     session_id: str = Field(..., min_length=1)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.3 — ``MeOut`` (response for ``GET /auth/me``)
+#
+# Card: t_ff6fa637. Extends the previous ``UserOut`` payload with the
+# two fields the post-signup first-login gate (frontend) needs:
+#
+# - ``weakness_profile`` — the user's saved axes (or ``None`` if the
+#   row hasn't been created yet; the gate treats ``None`` as empty).
+#   Reuses ``WeaknessProfileOut`` so the shape is byte-identical to
+#   ``GET /weakness-profile/{user_id}``.
+# - ``diagnostic_state`` — a coarse summary of the user's diagnostic
+#   probe history, computed from the most recent
+#   ``diagnostic_sessions`` row:
+#
+#   - ``"never"``       — no session has ever been started
+#   - ``"in_progress"`` — a session exists with status ``in_progress``
+#   - ``"completed"``   — most recent session is ``completed`` (the
+#     user has answered all 10 questions but hasn't applied yet)
+#   - ``"applied"``     — most recent session is ``applied`` (Apply
+#     has been clicked; the score is in the profile, even if the
+#     user then zeroed the sliders manually)
+#
+# The gate logic on the client is:
+#
+#   axes non-empty                              -> /weakness-profile
+#   axes empty AND state in {never,in_progress} -> /diagnostic
+#   axes empty AND state in {completed,applied} -> /weakness-profile
+#     (the user has been through the probe; respect their choice)
+#
+# The ``Literal`` keeps the response self-documenting — OpenAPI
+# surfaces the four valid values and the frontend gets a string
+# union on the wire.
+# ---------------------------------------------------------------------------
+
+
+DiagnosticState = Literal["never", "in_progress", "completed", "applied"]
+
+
+class MeOut(BaseModel):
+    """Response shape for ``GET /auth/me``.
+
+    Returned to the SPA on every auth probe (the protected-route
+    gate fires ``getMe()`` on mount, the post-login ``AuthForm``
+    uses it to decide where to land, the header re-probes on
+    ``lexora:auth-change``). The new fields are non-breaking — any
+    client that only reads ``id``/``email`` keeps working.
+    """
+
+    id: int
+    email: str
+    created_at: datetime
+    # ``None`` means the user has never had a profile row created
+    # (pre-Phase-2.1 schema, or simply hasn't loaded the profile
+    # page yet). The frontend treats ``None`` as ``{axes: {}}``.
+    weakness_profile: Optional[WeaknessProfileOut] = None
+    diagnostic_state: DiagnosticState = "never"
+
+    class Config:
+        from_attributes = True

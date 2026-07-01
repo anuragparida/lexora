@@ -1,14 +1,25 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { login, signup, type AuthUser } from '../auth'
+import { login, signup, getMe, type AuthUser } from '../auth'
+import { postAuthRoute } from '../routing/postAuthRoute'
 
-// Phase 2.3 (card t_ffe6d6af): combined signup/login form.
-// `mode` chooses the initial panel; the toggle is a plain link switch so
-// the form stays a single component (no router gymnastics).
+// Phase 2.3 (card t_ffe6d6af) + Phase 3.3 (card t_ff6fa637):
+// combined signup/login form.
 //
-// On success we store the token (already done inside `login` / `signup`)
-// and navigate to `/`. The Header in the new layout will pick up the
-// logged-in state from `getMe` on mount.
+// Phase 2.3 stored the token (already done inside `login` /
+// `signup`) and navigated to `/`. The Header in the new layout
+// picked up the logged-in state from `getMe` on mount.
+//
+// Phase 3.3 replaces the `navigate('/')` with a first-login gate:
+// after a successful signup / login we call `getMe()` and route
+// based on the user's diagnostic state. The full routing table
+// lives in ``postAuthRoute``; this component just calls it.
+//
+// On any error fetching the post-auth payload (network blip, etc.)
+// we fall back to the legacy ``/`` route — the header will
+// re-probe /auth/me on the next mount and the user is still
+// authenticated. Better to over-navigate than to leave the form
+// stuck.
 
 interface Props {
   mode: 'login' | 'signup'
@@ -32,7 +43,19 @@ export function AuthForm({ mode }: Props) {
       // AuthResponse shape lives in `auth.ts`; we type-narrow it here
       // without re-importing just to keep this component self-contained.
       void (res as { access_token: string; user: AuthUser })
-      navigate('/', { replace: true })
+      // Fetch /auth/me so the post-auth gate can decide where to
+      // land. The cookie is set by ``fn`` above so this round-trip
+      // is authenticated.
+      let target = '/'
+      try {
+        const me = await getMe()
+        target = postAuthRoute(me)
+      } catch {
+        // /auth/me failed (e.g. transient 5xx). The user is
+        // logged in — fall back to / so they at least see the
+        // app shell. The header will re-probe on next mount.
+      }
+      navigate(target, { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {

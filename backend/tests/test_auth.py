@@ -406,3 +406,169 @@ def test_password_hash_never_appears_in_any_response(client):
             json={"axes": {"verbs": 1}},
         ).json()
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.3 — ``/auth/me`` extended payload (card t_ff6fa637)
+#
+# The first-login gate on the frontend reads two extra fields from
+# ``/auth/me``:
+#
+#   - ``weakness_profile``   — the saved axes (or ``null`` if no row)
+#   - ``diagnostic_state``   — ``never`` | ``in_progress`` |
+#                             ``completed`` | ``applied``, computed
+#                             from the latest ``diagnostic_sessions`` row
+#
+# These tests cover all four ``diagnostic_state`` values plus the
+# ``weakness_profile`` projection. The base shape (id / email /
+# created_at) is covered by ``test_get_me_with_valid_cookie_returns_user``
+# above and remains unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_get_me_diagnostic_state_never_for_fresh_signup(client):
+    """A brand-new user (no diagnostic sessions) reports
+    ``diagnostic_state == "never"`` and ``weakness_profile is None``."""
+    _signup(client, email="ada@example.com", password="supersecret")
+    me = client.get("/auth/me").json()
+    assert me["diagnostic_state"] == "never"
+    assert me["weakness_profile"] is None
+
+
+def test_get_me_weakness_profile_reflects_saved_axes(client):
+    """After a PUT to /weakness-profile, /auth/me returns the
+    same ``WeaknessProfileOut`` shape (id, user_id, axes,
+    updated_at). The frontend gate reads ``axes`` to decide
+    where to land."""
+    body = _signup(client, email="ada@example.com", password="supersecret")
+    user_id = body["user"]["id"]
+    client.put(
+        f"/weakness-profile/{user_id}",
+        json={"axes": {"verbs": 2, "collocations": 1}},
+    )
+    me = client.get("/auth/me").json()
+    assert me["weakness_profile"] is not None
+    assert me["weakness_profile"]["user_id"] == user_id
+    assert me["weakness_profile"]["axes"] == {"verbs": 2, "collocations": 1}
+    # Even with axes saved, diagnostic_state is still "never"
+    # unless the user has actually started a probe.
+    assert me["diagnostic_state"] == "never"
+
+
+def test_get_me_diagnostic_state_in_progress_after_start(client):
+    """After ``POST /diagnostic/start`` (which inserts an
+    ``in_progress`` row), ``/auth/me`` reports
+    ``diagnostic_state == "in_progress"``."""
+    _signup(client, email="ada@example.com", password="supersecret")
+    start = client.post("/diagnostic/start")
+    assert start.status_code == 200
+    me = client.get("/auth/me").json()
+    assert me["diagnostic_state"] == "in_progress"
+
+
+def test_get_me_diagnostic_state_applied_after_apply(client):
+    """After ``POST /diagnostic/apply`` (which flips the session
+    to ``applied`` and UPSERTs the score into the profile),
+    ``/auth/me`` reports ``diagnostic_state == "applied"`` and
+    ``weakness_profile.axes`` carries the scored axes."""
+    from app.diagnostic.questions import QUESTIONS  # noqa: WPS433 (test-local import)
+
+    _signup(client, email="ada@example.com", password="supersecret")
+    session_id = client.post("/diagnostic/start").json()["session_id"]
+    # Answer every question so /apply has data to score.
+    for q in QUESTIONS:
+        idx = min(2, len(q.choices) - 1)
+        client.post(
+            "/diagnostic/answer",
+            json={
+                "session_id": session_id,
+                "question_id": q.id,
+                "choice_label": q.choices[idx].label,
+            },
+        )
+    apply = client.post(
+        "/diagnostic/apply", json={"session_id": session_id}
+    )
+    assert apply.status_code == 200
+
+    me = client.get("/auth/me").json()
+    assert me["diagnostic_state"] == "applied"
+    # The profile carries the computed axes — at least one should
+    # be non-zero because we answered with index 2 (mid-strength).
+    assert me["weakness_profile"] is not None
+    assert isinstance(me["weakness_profile"]["axes"], dict)
+
+
+def test_get_me_diagnostic_state_completed_from_db(client):
+    """A session with status ``completed`` (between ``/result`` and
+    ``/apply`` in the spec's mental model) is mapped to
+    ``"completed"`` on ``/auth/me``.
+
+    The current ``/diagnostic/result`` route doesn't actually flip
+    the status, so a ``completed`` row is not reachable through
+    the public API. We exercise the branch by inserting one
+    directly via the SQLAlchemy session. This is the same shape a
+    real ``/result``-then-``/apply`` flow would produce if the
+    route were extended in a future card.
+    """
+    from app.database import SessionLocal  # noqa: WPS433 (test-local import)
+    from app import models  # noqa: WPS433 (test-local import)
+
+    body = _signup(client, email="ada@example.com", password="supersecret")
+    user_id = body["user"]["id"]
+
+    # Insert a completed session directly. We don't go through the
+    # API because the API never produces this state in the current
+    # implementation — the test is asserting the read-side branch
+    # in ``read_me``, not the write path.
+    with SessionLocal() as db:
+        row = models.DiagnosticSession(
+            id="00000000-0000-0000-0000-000000000001",
+            user_id=user_id,
+            status="completed",
+        )
+        db.add(row)
+        db.commit()
+
+    me = client.get("/auth/me").json()
+    assert me["diagnostic_state"] == "completed"
+
+
+def test_get_me_diagnostic_state_uses_latest_session(client):
+    """When multiple diagnostic sessions exist, ``/auth/me`` reports
+    the status of the *most recent* one (newest-first ordering
+    on ``started_at``). This guards the routing gate against a
+    stale row winning the branch."""
+    from app.database import SessionLocal  # noqa: WPS433 (test-local import)
+    from app import models  # noqa: WPS433 (test-local import)
+    from datetime import datetime, timedelta  # noqa: WPS433 (test-local import)
+
+    body = _signup(client, email="ada@example.com", password="supersecret")
+    user_id = body["user"]["id"]
+
+    now = datetime.utcnow()
+    with SessionLocal() as db:
+        # Older "applied" row — should be shadowed by the newer
+        # "in_progress" row.
+        db.add(
+            models.DiagnosticSession(
+                id="11111111-1111-1111-1111-111111111111",
+                user_id=user_id,
+                status="applied",
+                started_at=now - timedelta(hours=1),
+            )
+        )
+        # Newer "in_progress" row — this is what /auth/me should
+        # surface.
+        db.add(
+            models.DiagnosticSession(
+                id="22222222-2222-2222-2222-222222222222",
+                user_id=user_id,
+                status="in_progress",
+                started_at=now,
+            )
+        )
+        db.commit()
+
+    me = client.get("/auth/me").json()
+    assert me["diagnostic_state"] == "in_progress"

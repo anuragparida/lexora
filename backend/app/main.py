@@ -398,15 +398,82 @@ def logout(response: Response):
     return response
 
 
-@app.get("/auth/me", response_model=schemas.UserOut)
+@app.get("/auth/me", response_model=schemas.MeOut)
 def read_me(
     current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """Return the authenticated user. 401 if no / invalid / expired
-    token (raised by the dependency, same opaque shape for all
-    failure modes).
+    """Return the authenticated user plus the two fields the
+    post-signup first-login gate needs: ``weakness_profile`` and
+    ``diagnostic_state``.
+
+    401 if no / invalid / expired token (raised by the dependency,
+    same opaque shape for all failure modes — never leaks whether
+    the cookie was missing vs. the signature was bad vs. the user
+    was deleted).
+
+    Phase 3.3 (card t_ff6fa637) added the two new fields. The
+    response shape is non-breaking for clients that only read
+    ``id`` / ``email`` — the header, the protected-route gate, and
+    the weakness-profile page all keep working without changes.
+
+    Computation:
+
+    - ``weakness_profile``: a single ``GET /weakness-profile``
+      lookup. ``None`` if the user has no profile row yet (we
+      deliberately do NOT auto-create here — the
+      ``/weakness-profile/{user_id}`` route is the only place that
+      auto-creates; the ``/auth/me`` payload is a read-only
+      projection). The frontend's gate treats ``None`` as empty.
+    - ``diagnostic_state``: a single query against
+      ``diagnostic_sessions`` for the user's most-recent row.
+      ``"never"`` when no row exists, otherwise the literal status
+      of the latest row. The status string is already constrained
+      to the four expected values by the model layer; we still
+      defensively fall back to ``"never"`` on any unexpected value
+      so a future bug never reaches the SPA as a 500.
     """
-    return current_user
+    profile_row = crud.get_weakness_profile(db, current_user.id)
+    if profile_row is None:
+        weakness_profile_payload = None
+    else:
+        weakness_profile_payload = {
+            "id": profile_row.id,
+            "user_id": profile_row.user_id,
+            "axes": crud.serialize_weakness_profile_axes(profile_row),
+            "updated_at": profile_row.updated_at,
+        }
+
+    sessions = crud.list_diagnostic_sessions(db, current_user.id)
+    if not sessions:
+        diagnostic_state: schemas.DiagnosticState = "never"
+    else:
+        # ``list_diagnostic_sessions`` returns newest-first; the
+        # gate on the client only cares about the most recent
+        # session's status, so we read row zero and trust the
+        # status string verbatim (``in_progress`` | ``completed``
+        # | ``applied``; the model also allows ``skipped`` which
+        # the gate treats as "user has decided to set axes
+        # manually" — same routing as ``completed`` / ``applied``).
+        latest_status = sessions[0].status
+        if latest_status in ("in_progress", "completed", "applied"):
+            diagnostic_state = latest_status  # type: ignore[assignment]
+        else:
+            # ``skipped`` (or any future status) → map to
+            # ``completed`` so the gate doesn't re-route the user
+            # back to the probe they've already opted out of. The
+            # literal type is open; the gate only branches on
+            # the two "send to diagnostic" values
+            # (``never`` / ``in_progress``).
+            diagnostic_state = "completed"
+
+    return schemas.MeOut(
+        id=current_user.id,
+        email=current_user.email,
+        created_at=current_user.created_at,
+        weakness_profile=weakness_profile_payload,
+        diagnostic_state=diagnostic_state,
+    )
 
 
 @app.get(

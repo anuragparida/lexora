@@ -1,10 +1,10 @@
-// Auth client for Phase 2.3 (card t_ffe6d6af).
+// Auth client for Phase 2.3 (card t_ffe6d6af) + Phase 3.3 (card t_ff6fa637).
 //
-// Talks to the Phase 2.2 backend (card t_74c3aa1e):
+// Talks to the Phase 2.2 + 3.3 backend (cards t_74c3aa1e + t_ff6fa637):
 //   POST /auth/signup  -> { access_token, user }
 //   POST /auth/login   -> { access_token, user }
 //   POST /auth/logout  -> 204
-//   GET  /auth/me      -> { id, email, created_at }
+//   GET  /auth/me      -> MePayload (id, email, created_at, weakness_profile, diagnostic_state)
 //
 // The real auth primitive is the `lexora_token` httpOnly cookie set by the
 // backend — every server request goes through it. The localStorage copy
@@ -18,9 +18,49 @@
 // `/auth/me` just to know if someone is "logged in".
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:18700'
-export const TOKEN_KEY='***'
+export const TOKEN_KEY='lexora_token'
 const AUTH_EVENT = 'lexora:auth-change'
 
+// The four possible values of `MePayload.diagnostic_state` — the server
+// computes this from the user's most recent `diagnostic_sessions` row.
+// Mirrors `schemas.DiagnosticState` in `backend/app/schemas.py` exactly
+// (string-literal union so the wire format is the same shape on both ends).
+export type DiagnosticState =
+  | 'never'
+  | 'in_progress'
+  | 'completed'
+  | 'applied'
+
+// Slimmed view of `WeaknessProfileOut` — the full row carries `id` /
+// `user_id` / `axes` / `updated_at`, but the gate only needs `axes`. The
+// `axes` field is an empty object for a brand-new profile (the backend
+// always returns a dict, never undefined / null inside the object).
+export interface WeaknessProfileSummary {
+  id: number
+  user_id: number
+  axes: Record<string, number>
+  updated_at: string
+}
+
+// Phase 3.3 (card t_ff6fa637): the post-signup first-login gate reads
+// `weakness_profile` and `diagnostic_state` from `/auth/me` to decide
+// where to land the user. The `id` / `email` / `created_at` fields
+// are unchanged from Phase 2.3.
+export interface MePayload {
+  id: number
+  email: string
+  created_at: string
+  // `null` when the user has no profile row yet (pre-Phase-2.1 schema,
+  // or simply hasn't loaded the profile page). The gate treats `null`
+  // the same as `{axes: {}}`.
+  weakness_profile: WeaknessProfileSummary | null
+  diagnostic_state: DiagnosticState
+}
+
+// Phase 2.3's `AuthUser` shape — what `signup` / `login` return under
+// the `user` key. Kept as a separate type because it's a subset of
+// `MePayload` and the auth-form login flow doesn't need the gate
+// fields (the form fetches them via `getMe` after a successful login).
 export interface AuthUser {
   id: number
   email: string
@@ -123,7 +163,7 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function getMe(): Promise<AuthUser> {
+export async function getMe(): Promise<MePayload> {
   const res = await fetch(`${API_URL}/auth/me`, {
     credentials: 'include',
   })
@@ -137,5 +177,5 @@ export async function getMe(): Promise<AuthUser> {
   if (!res.ok) {
     throw new Error(await parseError(res))
   }
-  return (await res.json()) as AuthUser
+  return (await res.json()) as MePayload
 }
