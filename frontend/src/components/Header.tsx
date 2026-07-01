@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { logout, getMe, AUTH_CHANGE_EVENT, type AuthUser } from '../auth'
 
-// Phase 2.3 (card t_ffe6d6af): app header bar.
+// Phase 2.3 (card t_ffe6d6af) + Phase 3.2 (card t_64055c49): app header bar.
 //
 // Three modes:
 //   - unauthenticated: shows "Log in" / "Sign up" links.
-//   - authenticated: shows email + "Log out" button.
+//   - authenticated: shows email + nav links ("Weakness profile",
+//     "Run diagnostic") + "Log out" button.
 //   - unknown (during the /auth/me probe): renders nothing on the right side
 //     to avoid a flash of "Log in" before the cookie probe resolves.
 //
@@ -86,6 +87,12 @@ export function Header() {
                 className="px-3 py-1.5 text-sm text-slate-300 hover:text-slate-100 transition-colors"
               >
                 Weakness profile
+              </Link>
+              <Link
+                to="/diagnostic"
+                className="px-3 py-1.5 text-sm text-slate-300 hover:text-slate-100 transition-colors"
+              >
+                Run diagnostic
               </Link>
               <button
                 type="button"
