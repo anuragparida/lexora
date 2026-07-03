@@ -46,6 +46,9 @@ services:
       # docker compose picks up automatically via the shell.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      # Phase 4.1 — chat client (app/llm.py). Same OpenRouter host as
+      # the embedding endpoint above; only the model id differs.
+      OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-qwen/qwen3-235b-a22b-2507}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-qwen/qwen3-embedding-8b}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
       EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-32}
