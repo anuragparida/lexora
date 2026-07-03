@@ -668,11 +668,29 @@ class ComprehensionExerciseOut(BaseExerciseFields):
       correct answer after the user submits.
     - ``rationale``: 1..400 chars. One sentence explaining the
       distractor design — what semantic axis separates the correct
-      answer from the wrong ones, so a hand-reviewer can verify
-      the model isn't a coin flip.
+      answer from the wrong ones, so a hand-reviewer can verify the
+      model isn't a coin flip.
+
+    ``exercise_id`` is the server-minted per-generation id (the
+    same shape 6.2 / 6.3 ship on the matching wire). Phase 6.6
+    expects to round-trip the same id on the ``grade_logs`` row so
+    the Ragas join in 6.7 is deterministic; adding the field here
+    is what 6.5 ships so 6.6 can dispatch on it.
     """
 
     exercise_type: Literal["comprehension"] = "comprehension"
+    exercise_id: int = Field(
+        ...,
+        description=(
+            "Server-minted per generation: "
+            "int.from_bytes(os.urandom(8), 'big', signed=True). "
+            "The same id re-appears on the grade_logs row for the "
+            "same exercise so the Ragas join is deterministic "
+            "(Phase 6.7 follow-up). Mirrors the matching wire shape "
+            "(6.2 / 6.3) and the GradeRequest.exercise_id: int "
+            "discriminator on the write side."
+        ),
+    )
     passage: str = Field(
         ...,
         min_length=20,
@@ -780,14 +798,16 @@ class ComprehensionGenerateRequest(BaseModel):
 # (cards t_ddaf9cf9, t_39d85400)
 #
 # Wire contract for ``POST /exercises/match`` (the route ships in 6.3).
-# Mirrors the comprehension wire shape (6.4): the response subclasses
-# ``BaseExerciseFields`` and adds matching-specific fields. ``exercise_id``
-# lives on the matching subclass only — it was in 6.2's narrower
-# ``BaseExerciseFields`` but 6.4 widened the base to the 3-way Literal
-# and dropped per-type bookkeeping from the shared mixin. The
-# comprehension-side 6.5 will add it back on ``ComprehensionExerciseOut``
-# to round-trip into ``/exercises/grade`` (Phase 6.6's ``ExerciseType``
-# dispatch).
+# Mirrors the comprehension wire shape (6.4 / 6.5): the response
+# subclasses ``BaseExerciseFields`` and adds matching-specific fields.
+# ``exercise_id`` lives on BOTH the matching and comprehension
+# subclasses — it was in 6.2's narrower ``BaseExerciseFields`` but
+# 6.4 widened the base to the 3-way Literal and dropped per-type
+# bookkeeping from the shared mixin. Phase 6.5 added it back on
+# ``ComprehensionExerciseOut`` so both wire shapes round-trip the
+# same id into ``/exercises/grade`` (Phase 6.6's ``ExerciseType``
+# dispatch) and into the ``grade_logs`` row for Ragas join
+# determinism (Phase 6.7 follow-up).
 # ---------------------------------------------------------------------------
 
 # Re-export ``MatchingPair`` from ``app.match`` so the wire schema and

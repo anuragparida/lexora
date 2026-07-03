@@ -1292,6 +1292,12 @@ def test_comprehension_exercise_out_wire_shape_matches_generator():
     """``ComprehensionExerciseOut`` (in ``app.schemas``) mirrors
     the generator fields and narrows the exercise_type
     discriminator to ``Literal["comprehension"]``.
+
+    Phase 6.5 added ``exercise_id`` to the wire shape (the
+    server-minted per-generation id that round-trips into
+    ``/exercises/grade`` for Phase 6.6 dispatch). The generator
+    ``ComprehensionExercise`` does NOT carry ``exercise_id`` —
+    the id is stamped at response time only.
     """
     from app.schemas import ComprehensionExerciseOut
 
@@ -1315,16 +1321,29 @@ def test_comprehension_exercise_out_wire_shape_matches_generator():
     ):
         assert f in out_fields, f"wire shape missing field: {f}"
 
+    # Wire-only field added in Phase 6.5: ``exercise_id`` (the
+    # matching wire shape added it in 6.2 / 6.3; 6.5 brings
+    # comprehension to parity so 6.6 can dispatch on the same id).
+    assert "exercise_id" in out_fields, (
+        "wire shape missing exercise_id field added in Phase 6.5"
+    )
+
 
 def test_comprehension_exercise_out_serialises_with_default_exercise_type():
     """The wire shape defaults ``exercise_type`` to
     ``"comprehension"`` so a future route that forgets to set
     the discriminator still emits the right tag.
+
+    The wire shape also carries a server-minted ``exercise_id``
+    (Phase 6.5 ships this so the same id round-trips into
+    ``/exercises/grade`` for Phase 6.6 dispatch and into the
+    ``grade_logs`` row for Phase 6.7 Ragas join determinism).
     """
     from app.schemas import ComprehensionExerciseOut
 
     out = ComprehensionExerciseOut(
         target_word_id=1,
+        exercise_id=42,
         passage=(
             "Der Hund läuft durch den Park. Er sieht einen Ball und "
             "rennt sofort los. Sein Besitzer lacht."
@@ -1341,6 +1360,9 @@ def test_comprehension_exercise_out_serialises_with_default_exercise_type():
         prompt_template_version="comprehension-v1",
     )
     assert out.exercise_type == "comprehension"
+    # ``exercise_id`` is a server-minted int; the test passes 42 to
+    # confirm the field round-trips through Pydantic validation.
+    assert out.exercise_id == 42
 
 
 def test_comprehension_generate_request_enable_rag_defaults_to_false():
