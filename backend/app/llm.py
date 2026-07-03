@@ -37,6 +37,16 @@ The probe is public (no API key needed). A real ``chat/completions``
 call would need the key and might still hit the privacy filter at
 the inference layer; Phase 4.1 does not call chat, so this probe is
 the strongest signal available at the foundation-build stage.
+
+Phase 6.2 (card t_ddaf9cf9) — DSPy adapter extraction.
+
+The ``_DSPyOpenAICompatLM`` adapter was originally private to
+``app.cloze`` (Phase 4.2). Phase 6.2 extracts it to ``app.llm`` so
+the matching-exercise generator (``app.match``) can share the same
+DSPy transport without duplicating the adapter. The class is defined
+here and re-exported from ``app.cloze`` for one release so any
+out-of-tree caller that imported ``app.cloze._DSPyOpenAICompatLM``
+keeps working; new code should import from ``app.llm`` directly.
 """
 from __future__ import annotations
 
@@ -44,6 +54,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
@@ -332,3 +343,66 @@ def complete(
         latency_ms=latency_ms,
         model=returned_model,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.2 (card t_ddaf9cf9) — DSPy adapter.
+#
+# Extracted from ``app.cloze`` so ``app.match`` (Phase 6.2) can share the
+# same DSPy transport without duplicating the adapter. The class is
+# functionally identical to the Phase 4.2 implementation; only the module
+# ownership changed. ``app.cloze`` re-exports the symbol under its old
+# name for one release — see the module docstring of ``app.cloze``.
+# ---------------------------------------------------------------------------
+
+
+class _DSPyOpenAICompatLM:
+    """Thin DSPy adapter that routes through ``app.llm.complete``.
+
+    DSPy 3.x has a built-in ``dspy.LM`` for OpenAI-compatible
+    endpoints, but it imports the ``openai`` SDK directly and bypasses
+    our retry + latency-recording wrapper. Using a hand-written
+    adapter lets us keep every chat call going through
+    ``app.llm.complete`` (Hard rule #4 + #5: "every LLM call goes
+    through app/llm.py").
+
+    We don't subclass ``dspy.BaseLM`` because DSPy 3.x's ``BaseLM``
+    enforces a constructor signature and ``__call__`` shape that
+    depends on the active DSPy version; a duck-typed adapter that
+    ``dspy.Predict`` accepts via ``settings.configure(lm=...)`` is
+    more portable across DSPy releases.
+
+    The adapter is only constructed when an OpenRouter key is
+    present, so the offline path (``DummyLM``) doesn't pay the
+    import cost.
+    """
+
+    # DSPy reads ``model`` off the LM instance when it builds
+    # ``dspy.Predict`` calls.
+    model: str
+
+    def __init__(self) -> None:
+        self.model = _default_model()
+
+    def __call__(self, prompt: str | None = None, **kwargs: Any) -> list[str]:
+        """DSPy v3.x entry point.
+
+        DSPy calls the LM with either ``prompt=...`` (legacy) or
+        ``messages=...`` (newer protocol). We accept both and
+        normalise into a messages-shaped ``app.llm.complete`` call.
+        Returns a list of strings — one per generation — which is the
+        shape DSPy 3.x expects from a custom LM.
+        """
+        messages = kwargs.get("messages")
+        if not messages:
+            messages = [{"role": "user", "content": prompt or ""}]
+        result = complete(messages=messages)
+        # DSPy expects a list of strings (one per sample).
+        return [result.text]
+
+    # DSPy 3.x sometimes probes ``basic_request`` directly; provide
+    # a passthrough so the optimiser can talk to the LM without
+    # knowing about our internal shape.
+    def basic_request(self, prompt: str | None = None, **kwargs: Any) -> list[dict]:
+        text = self.__call__(prompt=prompt, **kwargs)[0]
+        return [{"text": text}]

@@ -525,3 +525,142 @@ class ClozeDueExerciseOut(ClozeExerciseOut):
             "and created a new Learning row inline (first encounter)."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.2 — Matching exercise request / response (card t_ddaf9cf9)
+#
+# Wire contract for ``POST /exercises/match`` (the route ships in 6.3).
+# Mirrors Phase 4.2's ``ClozeExerciseOut`` shape: a Pydantic response
+# model that pairs with the matching generator in ``app.match``.
+#
+# The shared ``BaseExerciseFields`` mixin is the discriminator / version
+# / target id keyset defined in ``docs/PHASE-6.md`` §"The exercise-type
+# wire (locked contract for Phase 6)": ``exercise_type``,
+# ``exercise_id``, ``target_word_id``, ``prompt_template_version``. Each
+# exercise-type response (cloze / matching / comprehension) subclasses
+# this mixin and adds its own payload. Phase 4.2's ``ClozeExerciseOut``
+# predates the mixin and stays un-migrated to keep its diff empty; the
+# 6.x cards extend from ``BaseExerciseFields`` going forward.
+#
+# Hard rule #3: ``exercise_type`` is ``Literal["matching"]`` on the
+# response. The route handler (6.3) stamps the literal at response
+# time so a downstream mis-routing surfaces as a 422 at the consumer,
+# not a silent type drift.
+# ---------------------------------------------------------------------------
+
+
+class BaseExerciseFields(BaseModel):
+    """Shared wire fields for every Phase 6 exercise-type response.
+
+    Defined in ``docs/PHASE-6.md`` §"The exercise-type wire":
+    ``exercise_type`` (discriminator), ``exercise_id`` (server-minted
+    per-generation), ``target_word_id`` (FK to ``words.id``),
+    ``prompt_template_version`` (A/B key — bumps on prompt change).
+
+    The mixin is intentionally minimal: cloze + comprehension fields
+    are not retrofitted (Phase 4.2's ``ClozeExerciseOut`` predates the
+    mixin and stays unchanged for 6.2; the 6.4 comprehension card can
+    decide whether to migrate the cloze schema or leave it alone).
+    """
+
+    exercise_type: Literal["matching"] = "matching"
+    exercise_id: int = Field(
+        ...,
+        description=(
+            "Server-minted per generation: "
+            "int.from_bytes(os.urandom(8), 'big', signed=True). "
+            "The same id re-appears on the grade_logs row for the "
+            "same exercise so the Ragas join is deterministic."
+        ),
+    )
+    target_word_id: int = Field(
+        ..., description="FK to words.id of the target word."
+    )
+    prompt_template_version: str = Field(
+        ...,
+        description=(
+            "Should always equal 'match-v1' for production "
+            "generations; bumps when the prompt template changes "
+            "(A/B key for the Ragas eval)."
+        ),
+    )
+
+
+# Re-export ``MatchingPair`` from ``app.match`` so the wire
+# schema and the generator contract reference the same Pydantic
+# model. The split between ``app.schemas`` and ``app.match`` is a
+# module-organisation convention; the Pydantic model itself must
+# be the same so a response built from the generator's
+# ``MatchingExercise`` validates against the wire's
+# ``MatchingExerciseOut`` without an adapter step.
+#
+# The wire-side class adds Pydantic ``Field(...)`` descriptions
+# that don't appear on the generator-side class (so a frontend
+# consumer reading the OpenAPI doc gets the description text).
+# The shape — left_word_id / right_word_id / right_kind — is
+# identical, so the two classes are interchangeable for
+# instance-vs-instance assignment.
+from app.match import MatchingPair  # noqa: E402,F401  (re-export)
+
+
+class MatchingExerciseOut(BaseExerciseFields):
+    """Response shape for ``POST /exercises/match`` (Phase 6.3 route).
+
+    ``pairs`` is always in ``[MATCH_MIN_COUNT, MATCH_MAX_COUNT]`` — the
+    Pydantic model ``MatchingExercise`` in ``app.match`` enforces the
+    same bounds on the generator side, so the wire is the mirror of
+    the generator contract.
+
+    Subclassing ``BaseExerciseFields`` keeps the discriminator /
+    version / target_id keyset in one place; adding a new exercise
+    type in 6.4 / 6.5 only writes a new subclass + payload model.
+    """
+
+    pairs: list[MatchingPair] = Field(
+        ...,
+        min_length=2,
+        max_length=8,
+        description=(
+            "Match pairs the user connects (left -> right). Length "
+            "is bounded in [MATCH_MIN_COUNT=2, MATCH_MAX_COUNT=8] by "
+            "the generator; the wire constraint mirrors it so a "
+            "validation drift surfaces as 422, not as a runtime "
+            "shape mismatch."
+        ),
+    )
+
+
+# These bounds mirror the generator's hard-coded module constants in
+# ``app.match`` (Hard rule #9: type-level guardrails, not env). The
+# Pydantic field uses them directly so a drift between the two
+# modules is a test failure, not a silent footgun.
+class MatchGenerateRequest(BaseModel):
+    """Request body for ``POST /exercises/match`` (Phase 6.3 route).
+
+    Mirrors the ``GradeRequest`` shape (Phase 5.2): minimal request
+    body, the server picks the target word via
+    ``select_target_word`` and builds the rest. The two knobs the
+    caller can tweak are ``count`` (how many pairs to generate) and
+    ``enable_rag`` (RAG-on is opt-in — Hard rule #1).
+    """
+
+    count: int = Field(
+        default=4,
+        ge=2,
+        le=8,
+        description=(
+            "How many match pairs to generate. Must be in [2, 8]. "
+            "Default 4. Out-of-range values are rejected at the "
+            "Pydantic layer (422)."
+        ),
+    )
+    enable_rag: bool = Field(
+        default=False,
+        description=(
+            "Opt-in flag: True augments the prompt with retrieval "
+            "chunks from the /retrieve endpoint. False (default) "
+            "keeps the prompt byte-for-byte identical to the "
+            "no-RAG fixture so the offline eval stays reproducible."
+        ),
+    )
