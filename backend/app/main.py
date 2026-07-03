@@ -851,11 +851,22 @@ def get_due_exercise(
 
 
 # ---------------------------------------------------------------------------
-# Phase 5.3 — ``POST /exercises/grade`` (card t_5160eecf)
+# Phase 5.3 / 6.6 — ``POST /exercises/grade`` (cards t_5160eecf, t_d11d0011)
 #
-# The closed study loop's left half. The cloze UI (Phase 4.5) and the
-# due-queue endpoint (Phase 5.4) both call this route to record a
-# grade and persist the post-FSRS state.
+# The closed study loop's left half. The cloze UI (Phase 4.5), the
+# due-queue endpoint (Phase 5.4), and the Phase 6 matching /
+# comprehension UIs all call this route to record a grade and
+# persist the post-FSRS state.
+#
+# Phase 6.6 widens the route from a cloze-only handler to a 3-way
+# fan-out. The cloze handler (``_grade_cloze``) keeps its
+# byte-for-byte logic from Phase 5.3 — only the dispatch wrapper
+# was added. ``_grade_matching`` and ``_grade_comprehension`` are
+# sibling wrappers around the same ``apply_grade`` + ``grade_logs``
+# write path. The fan-out is per-exercise-type at the trace-span
+# level (cloze keeps ``exercise.grade``, matching uses
+# ``match.grade``, comprehension uses ``comprehension.grade``) —
+# the FSRS scheduling math is exercise-type-agnostic.
 #
 # Wire contract:
 #   - Auth: 401 if no / invalid JWT (raised by ``get_current_user``).
@@ -865,7 +876,9 @@ def get_due_exercise(
 #     ``None`` when keys are unset).
 #   - 422 on Pydantic validation failure (out-of-range grade, bad
 #     exercise_type, non-positive exercise_id) — FastAPI default
-#     handler.
+#     handler. The 3-way ``Literal["cloze", "matching",
+#     "comprehension"]`` is the wire-level gate; ``"speaking"`` /
+#     ``"CLOZE"`` / empty string all reject at the schema layer.
 #   - 500 on DB integrity failure (e.g. concurrent insert on the
 #     fsrs_cards unique constraint), with a structured error body.
 #
@@ -874,6 +887,10 @@ def get_due_exercise(
 #     derived from ``exercise_id`` (for the cloze kind in Phase 5,
 #     the cloze's ``answer_word_id`` is the exercise id — the wire
 #     schema docstring in ``schemas.GradeRequest`` documents this).
+#     For matching / comprehension, the same derivation holds:
+#     the FSRS card row keys on ``word_id``, and the exercise
+#     type only changes the trace span name and the
+#     ``grade_logs.exercise_type`` label.
 #   - The ``fsrs_cards`` row is looked up by ``word_id``. If no row
 #     exists (first encounter), a fresh Learning row is created
 #     inline (matching the ``/exercises/due`` first-encounter
@@ -886,10 +903,14 @@ def get_due_exercise(
 # Hard rules enforced here:
 #   1. py-fsrs only (no inline scheduling). All scheduling via
 #      ``apply_grade``.
-#   2. Cloze-only (Literal guardrail on the wire — the route trusts
-#      the schema and does not re-validate).
+#   2. Closed 3-way exercise-type literal (cloze / matching /
+#      comprehension) — the route trusts the schema and does not
+#      re-validate.
 #   4. Every grade is traced via ``_trace_grade``; ``trace_id``
-#      propagates to the ``grade_logs`` row.
+#      propagates to the ``grade_logs`` row. Span name is
+#      per-exercise-type (``exercise.grade`` for cloze,
+#      ``match.grade`` for matching, ``comprehension.grade`` for
+#      comprehension).
 #   5. Pydantic v2 validates input; the handler does no extra
 #      validation beyond what the schema enforces.
 # ---------------------------------------------------------------------------
@@ -901,7 +922,113 @@ def grade_exercise(
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    """Apply a 1-4 FSRS grade to the user's card for the cloze's word.
+    """Apply a 1-4 FSRS grade to the user's card for the requested
+    exercise type.
+
+    Phase 6.6 fan-out: the route dispatches on
+    ``payload.exercise_type`` via a ``match`` statement to the
+    per-type handler. Each handler is a thin wrapper around
+    ``_grade_one`` that pins the trace span name and the
+    ``grade_logs.exercise_type`` label — the FSRS scheduling path
+    is shared. The cloze handler (``_grade_cloze``) is the same
+    code that 5.3 shipped, lifted verbatim.
+    """
+    match payload.exercise_type:
+        case "cloze":
+            return _grade_cloze(db, current_user, payload)
+        case "matching":
+            return _grade_matching(db, current_user, payload)
+        case "comprehension":
+            return _grade_comprehension(db, current_user, payload)
+        case _:  # pragma: no cover — schema gate rejects this
+            # Defensive fallback. The ``GradeRequest`` schema's
+            # 3-way ``ExerciseType`` literal should have rejected
+            # anything outside the union upstream; if we reach
+            # here, the schema gate has been bypassed and we want
+            # a clean 422 rather than a 500.
+            raise HTTPException(
+                status_code=422,
+                detail=f"unsupported exercise_type: {payload.exercise_type}",
+            )
+
+
+def _grade_cloze(
+    db: Session,
+    current_user: models.User,
+    payload: schemas.GradeRequest,
+) -> schemas.GradeResponse:
+    """Phase 5.3's cloze-grade logic, lifted byte-for-byte into a
+    per-type handler.
+
+    Trace span name: ``exercise.grade`` (unchanged from 5.3).
+    ``grade_logs.exercise_type`` is ``"cloze"``.
+    """
+    return _grade_one(
+        db=db,
+        current_user=current_user,
+        payload=payload,
+        span_name="exercise.grade",
+    )
+
+
+def _grade_matching(
+    db: Session,
+    current_user: models.User,
+    payload: schemas.GradeRequest,
+) -> schemas.GradeResponse:
+    """Phase 6.6 matching-grade handler.
+
+    Sibling wrapper around ``_grade_one``. Trace span name:
+    ``match.grade``. ``grade_logs.exercise_type`` is
+    ``"matching"``. The FSRS scheduling path is shared with
+    ``_grade_cloze`` and ``_grade_comprehension`` — only the
+    span name and the audit-row label differ.
+    """
+    return _grade_one(
+        db=db,
+        current_user=current_user,
+        payload=payload,
+        span_name="match.grade",
+    )
+
+
+def _grade_comprehension(
+    db: Session,
+    current_user: models.User,
+    payload: schemas.GradeRequest,
+) -> schemas.GradeResponse:
+    """Phase 6.6 comprehension-grade handler.
+
+    Sibling wrapper around ``_grade_one``. Trace span name:
+    ``comprehension.grade``. ``grade_logs.exercise_type`` is
+    ``"comprehension"``. The FSRS scheduling path is shared
+    with ``_grade_cloze`` and ``_grade_matching`` — only the
+    span name and the audit-row label differ.
+    """
+    return _grade_one(
+        db=db,
+        current_user=current_user,
+        payload=payload,
+        span_name="comprehension.grade",
+    )
+
+
+def _grade_one(
+    *,
+    db: Session,
+    current_user: models.User,
+    payload: schemas.GradeRequest,
+    span_name: str,
+) -> schemas.GradeResponse:
+    """Apply a 1-4 FSRS grade to the user's card for the requested
+    exercise.
+
+    This is the shared body that all three per-type handlers
+    (``_grade_cloze`` / ``_grade_matching`` / ``_grade_comprehension``)
+    route through. The Phase 5.3 cloze-only body is preserved
+    byte-for-byte — the per-type handlers exist only to pin the
+    ``span_name`` and (via ``payload.exercise_type``) the
+    ``grade_logs.exercise_type`` label.
 
     See the section header above for the full wire contract.
     """
@@ -1094,6 +1221,7 @@ def grade_exercise(
         latency_ms=latency_ms,
         grade=payload.grade,
         exercise_id=payload.exercise_id,
+        span_name=span_name,
     )
 
     # ------------------------------------------------------------------
@@ -1152,8 +1280,16 @@ def _trace_grade(
     latency_ms: int,
     grade: int,
     exercise_id: int,
+    span_name: str = "exercise.grade",
 ) -> str | None:
-    """Emit one Langfuse ``exercise.grade`` span per grade request.
+    """Emit one Langfuse span per grade request.
+
+    Phase 6.6 widens the span name from a fixed
+    ``"exercise.grade"`` to a per-exercise-type value
+    (``exercise.grade`` for cloze, ``match.grade`` for matching,
+    ``comprehension.grade`` for comprehension). The default
+    keeps the Phase 5.3 cloze path byte-identical for callers
+    that don't pass the new argument.
 
     Mirrors ``_trace_retrieval`` and ``_trace_cloze``'s shape: a
     v2 SDK ``client.span(...)`` + ``span.update(metadata=...)`` +
@@ -1191,7 +1327,7 @@ def _trace_grade(
 
     span = None
     try:
-        span = client.span(name="exercise.grade")
+        span = client.span(name=span_name)
         span.update(
             # The ``input`` is the minimum discriminator pair (grade +
             # exercise_id); the full metadata contract lives in

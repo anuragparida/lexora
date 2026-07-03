@@ -416,23 +416,41 @@ class ClozeExerciseOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Phase 5.2 — Grade request / response (card t_88b6f1c4)
+# Phase 5.2 / 6.6 — Grade request / response (cards t_88b6f1c4, t_d11d0011)
 #
 # Wire contract for ``POST /exercises/grade``. Phase 5.3 imports this
 # shape — keeping schemas + models here means 5.3 and 5.4 read the
 # same Pydantic types and the same SQLAlchemy rows.
 #
-# Hard rule #2 (type-level guardrail): ``exercise_type`` is
-# ``Literal["cloze"]`` on BOTH request and response. Any deviation
-# (e.g. "matching", "comprehension") is a Pydantic
-# ValidationError, not a runtime check downstream — the type
-# system is the gate.
+# Phase 6.6 widens the ``exercise_type`` literal from a 1-way
+# ``Literal["cloze"]`` to a 3-way union
+# ``Literal["cloze", "matching", "comprehension"]``. The widening
+# is the wire-level guardrail — Pydantic rejects any other value
+# (``"speaking"``, ``"CLOZE"``, empty string) with a 422. The
+# existing 5.2/5.3 cloze callers are unaffected: Pydantic accepts
+# ``"cloze"`` as a subset of the 3-way union. The 5.3 grader logic
+# stays exercise-type-agnostic (it goes through ``apply_grade`` +
+# a ``grade_logs`` row, both of which already key on
+# ``exercise_type``), so the route layer is the only thing that
+# fans out per type.
+#
+# Hard rule #2 (type-level guardrail): ``exercise_type`` is a
+# closed 3-way literal on BOTH request and response. Any value
+# outside the union is a Pydantic ``ValidationError``, not a
+# runtime check downstream — the type system is the gate.
 #
 # Hard rule #5 (Pydantic v2 validated input): ``grade`` is
 # ``Literal[1, 2, 3, 4]`` — out-of-range grades (0, 5, -1) reject
 # at the schema layer. ``exercise_id`` carries ``gt=0`` so a 0
 # (or negative) id is rejected before it reaches the grader.
 # ---------------------------------------------------------------------------
+
+# The single source of truth for the closed 3-way exercise-type
+# union. The route layer in ``app.main`` dispatches on this same
+# value via a ``match`` statement (Python 3.10+). If a future card
+# widens the union (Phase 7+), the only edits are here + the
+# ``match`` arms in ``app.main`` + the matching handler functions.
+ExerciseType = Literal["cloze", "matching", "comprehension"]
 
 
 class GradeRequest(BaseModel):
@@ -442,14 +460,19 @@ class GradeRequest(BaseModel):
     that backs this exercise — for the cloze kind, the cloze
     generator (4.2) embeds ``answer_word_id`` in the
     ``ClozeExercise`` payload, so 5.3 derives the ``word_id``
-    from the card row, not the request. The request body
-    carries the ``grade`` score (1=Again, 2=Hard, 3=Good, 4=Easy)
-    only; the rest of the snapshot is reconstructed from the card
-    row + the Langfuse span.
+    from the card row, not the request. For matching /
+    comprehension (Phase 6.6), the same derivation holds: the
+    card row keys on ``word_id``, and the exercise type only
+    changes the trace span name and the ``grade_logs.exercise_type``
+    label — the FSRS scheduling path is exercise-type-agnostic.
+
+    The request body carries the ``grade`` score
+    (1=Again, 2=Hard, 3=Good, 4=Easy) only; the rest of the
+    snapshot is reconstructed from the card row + the Langfuse span.
     """
 
     exercise_id: int = Field(..., gt=0)
-    exercise_type: Literal["cloze"]
+    exercise_type: ExerciseType
     grade: Literal[1, 2, 3, 4]
 
 
@@ -458,21 +481,25 @@ class GradeResponse(BaseModel):
 
     Returns the post-grade snapshot: when the next review is due,
     the FSRS card state (1=Learning / 2=Review / 3=Relearning),
-    and the two scalar params the Langfuse ``exercise.grade``
-    span will surface (``stability``, ``difficulty``). The
-    ``trace_id`` is the Langfuse span id when keys are set,
-    ``None`` otherwise (graceful-degradation path).
+    and the two scalar params the Langfuse span will surface
+    (``stability``, ``difficulty``). The ``trace_id`` is the
+    Langfuse span id when keys are set, ``None`` otherwise
+    (graceful-degradation path).
+
+    ``exercise_type`` mirrors the request's literal — it's
+    repeated on the wire so the client can confirm which handler
+    served the call without re-deriving from the trace.
 
     The leading ``graded: Literal[True] = True`` discriminator is
     forward-leaning: when 5.3 / 5.4 evolve to return a richer
     payload (e.g. a 202 for "queued"), a new response model can
     introduce ``graded: Literal[False]`` and a tagged-union on
-    the wire. Phase 5 only ships the True branch.
+    the wire. Phase 5 / Phase 6 only ship the True branch.
     """
 
     graded: Literal[True] = True
     exercise_id: int
-    exercise_type: Literal["cloze"]
+    exercise_type: ExerciseType
     next_due_at: datetime
     card_state: int  # 1/2/3
     stability: float

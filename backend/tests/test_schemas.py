@@ -28,6 +28,7 @@ from app.schemas import (
     DiagnosticChoiceOut,
     DiagnosticQuestionOut,
     DiagnosticState,
+    ExerciseType,
     GradeRequest,
     GradeResponse,
     LoginRequest,
@@ -41,16 +42,66 @@ from app.schemas import (
 
 
 # ---------------------------------------------------------------------------
-# Phase 5.2 — GradeRequest / GradeResponse (card t_88b6f1c4)
+# Phase 5.2 / 6.6 — GradeRequest / GradeResponse (cards t_88b6f1c4, t_d11d0011)
 #
 # Hard rule #2 (type-level guardrail): ``exercise_type`` is the
-# schema-level gate. A drift to "matching" / "comprehension" is a
-# ValidationError — no runtime check downstream.
+# schema-level gate. Phase 6.6 widens it from
+# ``Literal["cloze"]`` to the 3-way ``ExerciseType`` alias
+# ``Literal["cloze", "matching", "comprehension"]``. A drift to
+# "speaking" / "writing" / "CLOZE" / empty string is a
+# ``ValidationError`` — no runtime check downstream.
 #
 # Hard rule #5 (Pydantic v2 validated input): ``grade`` is
 # ``Literal[1, 2, 3, 4]``; out-of-range grades reject at the
 # schema layer. ``exercise_id`` is ``gt=0``.
 # ---------------------------------------------------------------------------
+
+
+class TestExerciseTypeLiteral:
+    """Phase 6.6 (card t_d11d0011) — the closed 3-way
+    ``ExerciseType`` alias is the single source of truth for the
+    grade-route wire guardrail. The alias is a
+    ``typing.Literal`` — it isn't runtime-constructible, so we
+    drive a ``TypeAdapter`` to validate against the union.
+    """
+
+    def test_exercise_type_literal_is_closed_three_way(self):
+        """The ``ExerciseType`` literal covers exactly three
+        values: ``cloze``, ``matching``, ``comprehension``. Any
+        other value rejects.
+        """
+        adapter = TypeAdapter(ExerciseType)
+
+        # The three valid types round-trip.
+        for v in ("cloze", "matching", "comprehension"):
+            assert adapter.validate_python(v) == v
+
+        # Anything else is a ValidationError — including the
+        # Phase 5.3 cloze-only drift targets (case variants, the
+        # empty string, types that are "exercise-like" but not
+        # in the closed union).
+        for v in (
+            "speaking",
+            "writing",
+            "CLOZE",
+            "MATCHING",
+            "",
+            "cloze ",
+            "cloze-extra",
+        ):
+            with pytest.raises(ValidationError):
+                adapter.validate_python(v)
+
+    def test_exercise_type_literal_exposes_three_members(self):
+        """The literal exposes exactly three members via
+        ``get_args`` — pins the closed 3-way shape so a future
+        widening card has to update this test explicitly.
+        """
+        assert set(get_args(ExerciseType)) == {
+            "cloze",
+            "matching",
+            "comprehension",
+        }
 
 
 class TestGradeRequest:
@@ -86,12 +137,43 @@ class TestGradeRequest:
         assert "grade" in str(exc.value)
 
     @pytest.mark.parametrize(
-        "exercise_type", ["matching", "comprehension", "CLOZE", ""]
+        "exercise_type", ["cloze", "matching", "comprehension"]
     )
-    def test_non_cloze_exercise_type_is_rejected(self, exercise_type):
-        """Hard rule #2 — ``exercise_type`` is hard-locked to
-        ``"cloze"``. Any other value, including case variants and
-        the empty string, is a ``ValidationError``.
+    def test_each_valid_exercise_type_is_accepted(self, exercise_type):
+        """Phase 6.6 widens the ``exercise_type`` literal to a
+        3-way union. The three values round-trip cleanly.
+        """
+        req = GradeRequest(
+            exercise_id=1,
+            exercise_type=exercise_type,
+            grade=3,
+        )
+        assert req.exercise_type == exercise_type
+
+    @pytest.mark.parametrize(
+        "exercise_type",
+        [
+            "speaking",
+            "writing",
+            "CLOZE",
+            "MATCHING",
+            "COMPREHENSION",
+            "cloze ",
+            "",
+        ],
+    )
+    def test_non_union_exercise_type_is_rejected(self, exercise_type):
+        """Hard rule #2 — ``exercise_type`` is locked to the
+        closed 3-way union ``Literal["cloze", "matching",
+        "comprehension"]``. Any other value (case variants,
+        near-misses, empty string) is a ``ValidationError``.
+
+        Phase 5.3 pinned this with the cloze-only drift targets
+        ``"matching"`` / ``"comprehension"`` / ``"CLOZE"`` / ``""``.
+        Phase 6.6 splits the original test in two: ``matching``
+        and ``comprehension`` are now *valid* (see
+        ``test_each_valid_exercise_type_is_accepted``), and the
+        new rejection set is everything outside the closed union.
         """
         with pytest.raises(ValidationError) as exc:
             GradeRequest(
@@ -171,13 +253,28 @@ class TestGradeResponse:
         with pytest.raises(ValidationError):
             GradeResponse.model_validate(self._sample(graded=False))
 
-    def test_non_cloze_exercise_type_is_rejected(self):
+    @pytest.mark.parametrize(
+        "exercise_type", ["cloze", "matching", "comprehension"]
+    )
+    def test_each_valid_exercise_type_is_accepted(self, exercise_type):
+        """Phase 6.6 — the response side carries the same 3-way
+        union as the request. Each value round-trips.
+        """
+        out = GradeResponse.model_validate(
+            self._sample(exercise_type=exercise_type)
+        )
+        assert out.exercise_type == exercise_type
+
+    def test_non_union_exercise_type_is_rejected(self):
         """Same Hard rule #2 guardrail on the response side —
-        the wire shape can't smuggle a non-cloze kind back to the
-        client either (defense in depth)."""
+        the wire shape can't smuggle a non-union kind back to
+        the client either (defense in depth). Phase 6.6 widens
+        from cloze-only to 3-way; the rejection set is now
+        anything outside the union.
+        """
         with pytest.raises(ValidationError):
             GradeResponse.model_validate(
-                self._sample(exercise_type="matching")
+                self._sample(exercise_type="speaking")
             )
 
     def test_trace_id_can_be_none(self):

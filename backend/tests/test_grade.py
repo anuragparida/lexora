@@ -1,4 +1,5 @@
-"""Tests for Phase 5.3 — ``POST /exercises/grade`` (card t_5160eecf).
+"""Tests for Phase 5.3 — ``POST /exercises/grade`` (card t_5160eecf)
++ Phase 6.6 (card t_d11d0011).
 
 Coverage map (mirrors the card body's "pytest cases" section):
 
@@ -15,7 +16,9 @@ Coverage map (mirrors the card body's "pytest cases" section):
 4. Langfuse keys absent: ``get_langfuse`` returns ``None``; row
    inserts with ``trace_id=None``; no exception.
 5. Out-of-range grade: ``GradeRequest(grade=5)`` → 422.
-6. ``exercise_type="matching"`` → 422 (the Literal guardrail).
+6. ``exercise_type="speaking"`` → 422 (the widened 3-way Literal
+   guardrail — Phase 6.6 replaced the Phase 5.3 cloze-only
+   Literal with ``Literal["cloze", "matching", "comprehension"]``).
 7. No JWT → 401.
 8. DB integrity failure (e.g. concurrent insert on the unique
    constraint) → 500 with a structured body.
@@ -34,6 +37,21 @@ Plus additional cases that pin the 5.3 contract tightly:
     latency_ms).
 12. The route handler does NOT touch ``backend/app/cloze.py`` or
     ``backend/app/llm.py`` (git-level regression guard).
+
+Phase 6.6 additions (card t_d11d0011):
+
+13. ``exercise_type="matching"`` → 200 with a ``GradeResponse``
+    carrying ``exercise_type="matching"``; the ``grade_logs``
+    row records ``exercise_type="matching"``.
+14. ``exercise_type="comprehension"`` → 200; ``grade_logs``
+    row records ``exercise_type="comprehension"``.
+15. ``exercise_type="cloze"`` → 200 (regression guard for the
+    Phase 5.3 path that 6.6 didn't touch byte-for-byte).
+16. The ``/exercises/grade`` route dispatches on
+    ``payload.exercise_type`` via a ``match`` statement and
+    delegates to per-type handlers (``_grade_cloze``,
+    ``_grade_matching``, ``_grade_comprehension``) — regression
+    guard for the 6.6 fan-out.
 
 Hermetic: a fresh temp SQLite DB + a temp JWT secret per test.
 The Langfuse client is mocked via ``monkeypatch.setattr`` on
@@ -524,13 +542,21 @@ def test_out_of_range_grade_returns_422(client, db_session) -> None:
 
 
 # ===========================================================================
-# 6. exercise_type="matching" → 422 (Literal guardrail)
+# 6. exercise_type="speaking" → 422 (widened 3-way Literal guardrail)
 # ===========================================================================
 
 
 def test_unsupported_exercise_type_returns_422(client, db_session) -> None:
-    """``exercise_type="matching"`` is rejected by the
-    ``Literal["cloze"]`` wire guardrail.
+    """``exercise_type="speaking"`` is rejected by the
+    ``Literal["cloze", "matching", "comprehension"]`` wire
+    guardrail widened in Phase 6.6.
+
+    Note: in Phase 5.3 this test pinned ``exercise_type="matching"`` →
+    422 because the literal was cloze-only. Phase 6.6 widens the
+    literal to three values, so ``"matching"`` is now a *valid*
+    request (see tests #13 / #14). The regression here is the
+    anything-outside-the-3-way-union case, which the card body
+    pins as ``"speaking"``.
     """
     _signup(client)
     word_id = _seed_word(db_session, word="Baum", word_type="Noun")
@@ -539,7 +565,7 @@ def test_unsupported_exercise_type_returns_422(client, db_session) -> None:
         "/exercises/grade",
         json={
             "exercise_id": word_id,
-            "exercise_type": "matching",
+            "exercise_type": "speaking",
             "grade": 3,
         },
     )
@@ -807,4 +833,223 @@ def test_grade_handler_does_not_touch_cloze_or_llm() -> None:
     )
     assert "from app.llm" not in handler and "import llm" not in handler, (
         "/exercises/grade handler imports llm.py — out of scope"
+    )
+
+
+# ===========================================================================
+# 13. exercise_type="matching" → 200 + GradeResponse{exercise_type: "matching"}
+# ===========================================================================
+
+
+def test_matching_grade_returns_200_with_matching_response(
+    client, db_session
+) -> None:
+    """``exercise_type="matching"`` is now a valid value in the
+    widened 3-way Literal. The route's ``_grade_matching`` handler
+    runs the same ``apply_grade`` + ``grade_logs`` write path as
+    the cloze branch, just with a different trace span name
+    (``match.grade``) and a different ``grade_logs.exercise_type``
+    label.
+    """
+    _signup(client)
+    word_id = _seed_word(db_session, word="Stuhl", word_type="Noun")
+
+    resp = client.post(
+        "/exercises/grade",
+        json={
+            "exercise_id": word_id,
+            "exercise_type": "matching",
+            "grade": 3,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["graded"] is True
+    assert payload["exercise_id"] == word_id
+    assert payload["exercise_type"] == "matching"
+    assert payload["trace_id"] is None
+    assert payload["card_state"] in (1, 2, 3)
+    assert payload["stability"] >= 0
+    assert payload["difficulty"] >= 0
+    assert isinstance(payload["next_due_at"], str)
+
+
+# ===========================================================================
+# 14. exercise_type="comprehension" → 200 + grade_logs row carries the label
+# ===========================================================================
+
+
+def test_comprehension_grade_returns_200_with_comprehension_response(
+    client, db_session
+) -> None:
+    """``exercise_type="comprehension"`` is the third value in the
+    widened 3-way Literal. The route's ``_grade_comprehension``
+    handler runs the same ``apply_grade`` + ``grade_logs`` write
+    path, with trace span name ``comprehension.grade`` and a
+    ``grade_logs.exercise_type`` label of ``"comprehension"``.
+    """
+    _signup(client)
+    word_id = _seed_word(db_session, word="Tisch", word_type="Noun")
+
+    resp = client.post(
+        "/exercises/grade",
+        json={
+            "exercise_id": word_id,
+            "exercise_type": "comprehension",
+            "grade": 3,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["graded"] is True
+    assert payload["exercise_id"] == word_id
+    assert payload["exercise_type"] == "comprehension"
+
+
+def test_comprehension_grade_log_row_records_exercise_type(
+    client, db_session
+) -> None:
+    """The ``grade_logs`` row written by the comprehension
+    handler carries ``exercise_type="comprehension"`` — same
+    audit-row shape as the cloze / matching paths, only the
+    label differs.
+    """
+    from app import models
+
+    _signup(client)
+    word_id = _seed_word(db_session, word="Lampe", word_type="Noun")
+
+    resp = client.post(
+        "/exercises/grade",
+        json={
+            "exercise_id": word_id,
+            "exercise_type": "comprehension",
+            "grade": 4,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    log = (
+        db_session.query(models.GradeLog)
+        .filter(models.GradeLog.word_id == word_id)
+        .first()
+    )
+    assert log is not None
+    assert log.exercise_type == "comprehension"
+    assert log.exercise_id == word_id
+    assert log.word_id == word_id
+    assert log.grade == 4
+
+
+# ===========================================================================
+# 15. exercise_type="cloze" → 200 (regression guard for the Phase 5.3 path)
+# ===========================================================================
+
+
+def test_cloze_grade_still_200_after_6_6_fan_out(
+    client, db_session
+) -> None:
+    """Phase 6.6 extracted the cloze logic into ``_grade_cloze`` —
+    the wire-level behavior must be identical to Phase 5.3.
+
+    The card body pins this as a regression guard: "Existing
+    cloze callers are unaffected (Pydantic accepts ``"cloze"`` as
+    a subset of the union)." The cloze handler's body is
+    byte-for-byte the Phase 5.3 body, just lifted into a sibling
+    function — so the only check this test adds is that the
+    response still carries ``exercise_type="cloze"`` after the
+    3-way fan-out.
+    """
+    _signup(client)
+    word_id = _seed_word(db_session, word="Buch", word_type="Noun")
+
+    resp = client.post(
+        "/exercises/grade",
+        json={
+            "exercise_id": word_id,
+            "exercise_type": "cloze",
+            "grade": 3,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["graded"] is True
+    assert payload["exercise_id"] == word_id
+    assert payload["exercise_type"] == "cloze"
+    assert payload["card_state"] in (1, 2, 3)
+
+
+# ===========================================================================
+# 16. Regression guard — /exercises/grade dispatches on exercise_type
+#     via a match statement + per-type handlers exist in main.py
+# ===========================================================================
+
+
+def test_grade_route_dispatches_via_match_statement() -> None:
+    """Pin the Phase 6.6 fan-out shape: the route uses a
+    ``match`` statement on ``payload.exercise_type`` and delegates
+    to ``_grade_cloze`` / ``_grade_matching`` / ``_grade_comprehension``
+    sibling functions. ``_grade_one`` carries the shared body.
+
+    Hermetic: source-grep ``backend/app/main.py`` so the test
+    doesn't need a database or client. Catches a future refactor
+    that puts the dispatch logic in an ``if/elif`` chain or that
+    inlines one of the handlers into the route.
+    """
+    import os
+
+    main_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "app", "main.py")
+    )
+    with open(main_path, encoding="utf-8") as f:
+        main_src = f.read()
+
+    # Three per-type handlers must exist as siblings of the
+    # shared ``_grade_one`` body.
+    assert "def _grade_cloze" in main_src, (
+        "_grade_cloze handler missing from main.py"
+    )
+    assert "def _grade_matching" in main_src, (
+        "_grade_matching handler missing from main.py"
+    )
+    assert "def _grade_comprehension" in main_src, (
+        "_grade_comprehension handler missing from main.py"
+    )
+    assert "def _grade_one" in main_src, (
+        "_grade_one shared body missing from main.py"
+    )
+
+    # The route dispatches on payload.exercise_type via a match
+    # statement. We look for the per-type call sites — each
+    # handler must be invoked from the dispatch.
+    assert "_grade_cloze(db, current_user, payload)" in main_src, (
+        "route does not call _grade_cloze from the dispatch"
+    )
+    assert "_grade_matching(db, current_user, payload)" in main_src, (
+        "route does not call _grade_matching from the dispatch"
+    )
+    assert (
+        "_grade_comprehension(db, current_user, payload)" in main_src
+    ), "route does not call _grade_comprehension from the dispatch"
+
+    # The dispatch is a match statement (Python 3.10+) on
+    # payload.exercise_type. We pin the literal arms so a future
+    # refactor that re-shapes the dispatch (e.g. into a dict
+    # lookup) shows up here.
+    assert (
+        'match payload.exercise_type:\n' in main_src
+        or "match payload.exercise_type:\n" in main_src
+    ), "/exercises/grade route is not a match statement"
+
+    # Each per-type handler threads the right span name into
+    # ``_grade_one`` — these are the trace-span names the card
+    # body pins as the fan-out contract.
+    assert 'span_name="exercise.grade"' in main_src, (
+        "cloze span name not pinned to 'exercise.grade'"
+    )
+    assert 'span_name="match.grade"' in main_src, (
+        "matching span name not pinned to 'match.grade'"
+    )
+    assert 'span_name="comprehension.grade"' in main_src, (
+        "comprehension span name not pinned to 'comprehension.grade'"
     )
