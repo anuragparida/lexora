@@ -224,11 +224,35 @@ class ClozeGenerationError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
-def select_target_word(db: Session, user_id: int) -> models.Word:
-    """Pick a ``Word`` deterministically for the cloze exercise.
+def select_target_word(
+    db: Session,
+    user_id: int,
+    *,
+    force_word_id: int | None = None,
+) -> models.Word:
+    """Pick a ``Word`` for the cloze exercise.
 
-    Algorithm
-    ---------
+    Two modes:
+
+    1. **Default (``force_word_id=None``)** — deterministic seed of
+       ``(user_id, axis, date.today())``; same triple → same word
+       across calls. Used by the Phase 4.5 ``POST /exercises/cloze``
+       surface where the server picks based on the user's weakness
+       profile. Documented below; the algorithm and stability
+       commitment are unchanged from Phase 4.2.
+
+    2. **Forced (``force_word_id=<int>``)** — look up the ``Word``
+       row by primary key and return it directly. Used by Phase 5.4's
+       ``GET /exercises/due`` route, which has already picked a
+       specific word from the ``fsrs_cards`` due queue and wants
+       ``generate_cloze`` to build the exercise for THAT word (not
+       re-select from the user's weakness profile). If the id does
+       not exist, raise ``ValueError`` — the route layer maps that
+       to 500 (corpus inconsistency; the due-queue picked a word
+       that's no longer in the words table).
+
+    Algorithm (default mode)
+    -------------------------
     1. Read the user's ``WeaknessProfile.axes`` (default empty).
     2. Pick the axis with the **highest score** (the score scale is
        0=unknown / 1=shaky / 2=developing / 3=critical — the spec
@@ -261,10 +285,28 @@ def select_target_word(db: Session, user_id: int) -> models.Word:
     Raises
     ------
     ValueError
-        If the mapped ``word_type`` has zero rows in the corpus
-        (caller error: the axis / word_type mapping is wrong, or the
-        corpus is empty). Routes translate this to 500.
+        If ``force_word_id`` is set and the word id does not exist
+        (corpus inconsistency — the caller picked an id that isn't
+        in the words table). Also raised if the mapped ``word_type``
+        in default mode has zero rows (caller error: the axis /
+        word_type mapping is wrong, or the corpus is empty).
+        Routes translate both to 500.
     """
+    # Phase 5.4 — forced mode. Bypass the seed scheme entirely; the
+    # caller (the /exercises/due route) has already picked the word
+    # from the fsrs_cards due queue and wants THIS word, not a
+    # re-selection from the user's weakness profile. The default mode
+    # below stays byte-for-byte identical to Phase 4.2's behaviour —
+    # the ``force_word_id`` keyword is the only addition.
+    if force_word_id is not None:
+        word = crud.get_word(db, word_id=force_word_id)
+        if word is None:
+            raise ValueError(
+                f"select_target_word: force_word_id={force_word_id} "
+                "does not match any Word row (corpus inconsistency)"
+            )
+        return word
+
     profile = crud.get_weakness_profile(db, user_id)
     axes: dict[str, int] = (
         crud.serialize_weakness_profile_axes(profile)
@@ -468,12 +510,20 @@ def _openai_client():
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
-def generate_cloze(db: Session, user_id: int) -> ClozeExercise:
+def generate_cloze(
+    db: Session,
+    user_id: int,
+    *,
+    force_word_id: int | None = None,
+) -> ClozeExercise:
     """Generate one ``ClozeExercise`` for a logged-in user.
 
     Flow
     ----
-    1. ``select_target_word`` picks the deterministic target word.
+    1. ``select_target_word`` picks the deterministic target word
+       (Phase 4.5 default mode), or — when ``force_word_id`` is
+       set — looks up the specific word id and returns it (Phase 5.4
+       ``GET /exercises/due`` mode).
     2. Read the user's weakness axes for the prompt.
     3. ``build_prompt`` produces the chat messages.
     4. Wrap an OpenRouter-targeted OpenAI client with ``instructor``
@@ -488,6 +538,17 @@ def generate_cloze(db: Session, user_id: int) -> ClozeExercise:
     5. Stamp ``prompt_template_version`` and the metadata contract
        fields onto the result; call ``_trace_cloze`` (4.3's no-op
        stub here) with the metadata dict.
+
+    Parameters
+    ----------
+    force_word_id
+        Optional. When set, ``select_target_word`` returns this
+        exact word (looked up by primary key) instead of running the
+        deterministic seed. Used by ``GET /exercises/due`` (Phase
+        5.4) which has already picked a specific word from the
+        ``fsrs_cards`` due queue. Defaults to ``None`` — the
+        Phase 4.5 ``POST /exercises/cloze`` path stays byte-for-byte
+        identical.
 
     Returns
     -------
@@ -509,10 +570,15 @@ def generate_cloze(db: Session, user_id: int) -> ClozeExercise:
         ``attempted_schema``, ``last_validation_error``,
         ``schema_retry_count`` so the route layer can surface a
         structured 502 instead of a bare 500.
+    ValueError
+        Bubbles up from ``select_target_word`` when
+        ``force_word_id`` does not match any row in the words table
+        (corpus inconsistency). The route layer translates this into
+        500.
     """
     from app.llm import _default_model, LLMError
 
-    word = select_target_word(db, user_id)
+    word = select_target_word(db, user_id, force_word_id=force_word_id)
 
     profile = crud.get_weakness_profile(db, user_id)
     weakness_axes: dict[str, int] = (

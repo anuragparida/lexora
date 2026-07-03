@@ -2,8 +2,10 @@ import os
 import logging
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import Any, List, Optional, Literal
@@ -636,6 +638,216 @@ def generate_cloze_exercise(
     return exercise.model_copy(
         update={"prompt_template_version": PROMPT_TEMPLATE_VERSION}
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.4 — ``GET /exercises/due`` (card t_e8548d6d)
+#
+# The closed study loop's right half. Given an authenticated user,
+# return the next cloze they're due to review (FSRS-driven) OR a fresh
+# word they've never seen (first-encounter warm-up).
+#
+# Wire contract:
+#   - Auth: 401 if no / invalid JWT (raised by ``get_current_user``).
+#   - 204 No Content if no ``fsrs_cards`` rows are due AND no fresh
+#     words exist in the corpus (the user has nothing to study; the
+#     frontend shows an honest empty state).
+#   - 200 + ``ClozeDueExerciseOut`` (the cloze payload plus a
+#     ``due_from_fsrs: bool`` discriminator) otherwise.
+#   - 502 if the cloze LLM call fails (transport / persistent schema
+#     violation); 500 on corpus inconsistency (the due-queue picked
+#     a word id that's no longer in the words table).
+#
+# Single-user dev assumption:
+#   Phase 5's ``fsrs_cards`` table has no ``user_id`` column, so the
+#   query is global — any due card in the system is returned to any
+#   authenticated user. Phase 6 may add the column for per-user
+#   scoping. The model assumes a single-user dev environment; the
+#   route is documented as such.
+#
+# Two branches:
+#   1. **FSRS-driven (due_from_fsrs=True).** Pick the row from
+#      ``fsrs_cards`` whose ``due_date <= now()`` and that has the
+#      earliest due_date. The picked word has a row in fsrs_cards
+#      (we just queried it) — we don't need to create one. Pass its
+#      word_id to ``generate_cloze(force_word_id=...)`` so the cloze
+#      is built for THIS word, not a fresh selection.
+#   2. **First-encounter (due_from_fsrs=False).** No card is due.
+#      Pick the lowest-id ``Word`` row that has NO ``fsrs_cards`` row
+#      yet — i.e. the user has never seen this word. Create a fresh
+#      Learning row inline (state=1, due=now) so the next
+#      ``POST /exercises/grade`` has a row to update. Pass its
+#      word_id to ``generate_cloze(force_word_id=...)``.
+#
+# The route is intentionally thin — all word selection + cloze
+# generation logic lives in ``app.cloze``. The route is responsible
+# only for the due-queue SQL + the inline Learning-row creation.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/exercises/due", response_model=schemas.ClozeDueExerciseOut)
+def get_due_exercise(
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Return the next cloze the authenticated user is due to review.
+
+    See the section header above for the full wire contract. The
+    two-branch logic is documented inline below.
+    """
+    from app.cloze import (
+        ClozeGenerationError,
+        generate_cloze,
+        PROMPT_TEMPLATE_VERSION,
+    )
+    from app.llm import LLMError
+
+    now = datetime.utcnow()
+
+    # Branch 1: FSRS-driven. Pick the earliest-due fsrs_cards row.
+    # The query is intentionally global (no user_id filter) per the
+    # single-user dev assumption documented in the section header.
+    # Tie-break on ``id`` ASC so the deterministic ordering survives
+    # any clock skew between request time and ``due_date``.
+    due_row = (
+        db.query(models.FsrsCard)
+        .filter(models.FsrsCard.due_date <= now)
+        .order_by(
+            models.FsrsCard.due_date.asc(),
+            models.FsrsCard.id.asc(),
+        )
+        .first()
+    )
+    if due_row is not None:
+        picked_word_id: int = due_row.word_id
+        due_from_fsrs = True
+    else:
+        # Branch 2: First-encounter. Pick a corpus word that has no
+        # fsrs_cards row yet. The ``NOT IN`` subquery is the simplest
+        # portable shape; both SQLite and Postgres support it. We use
+        # ``select(...)`` explicitly (SQLAlchemy 2.x's preferred
+        # form) rather than passing the subquery object directly to
+        # ``.in_()`` — the latter emits a SAWarning and is deprecated.
+        graded_word_ids_subq = (
+            select(models.FsrsCard.word_id)
+            .where(models.FsrsCard.word_id.isnot(None))
+            .scalar_subquery()
+        )
+        fresh_word = (
+            db.query(models.Word)
+            .filter(~models.Word.id.in_(graded_word_ids_subq))
+            .order_by(models.Word.id.asc())
+            .first()
+        )
+        if fresh_word is None:
+            # No due cards AND no fresh words in the corpus. The user
+            # has literally nothing to study. 204 keeps the contract
+            # clean — the frontend's "All caught up" empty state is
+            # the right surface, not a fake exercise.
+            return Response(status_code=204)
+
+        picked_word_id = fresh_word.id
+        # Inline-create a fresh Learning row so the next
+        # ``POST /exercises/grade`` (Phase 5.3) has a row to update.
+        # ``state=1`` is py-fsrs's ``State.Learning`` (1/2/3 in the
+        # 4.1.2 enum); ``due_date=now`` makes the card immediately
+        # due so a same-session grade works. All other numeric
+        # columns start at 0 / None — py-fsrs will populate them on
+        # the first ``review_card`` call.
+        new_card = models.FsrsCard(
+            word_id=picked_word_id,
+            difficulty=None,
+            stability=None,
+            retrievability=None,
+            due_date=now,
+            last_review=None,
+            reps=0,
+            lapses=0,
+            state=1,
+            elapsed_days=0,
+            scheduled_days=0,
+        )
+        db.add(new_card)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Concurrent insert beat us to it — another request just
+            # created an fsrs_cards row for this word. The unique
+            # constraint (Phase 5.2's ``UNIQUE(word_id)``) fires here.
+            # Roll back and re-query: the row exists now, so the
+            # *next* /exercises/due call will see it via Branch 1.
+            # For THIS call, we still want to give the user a cloze
+            # for the picked word — keep due_from_fsrs=False because
+            # semantically this is still a first-encounter from the
+            # user's perspective. The fresh Learning row exists now
+            # regardless of who won the race.
+            db.rollback()
+            logger.info(
+                "exercises/due: concurrent fsrs_cards insert for "
+                "word_id=%d; rolling back the inline create",
+                picked_word_id,
+            )
+        due_from_fsrs = False
+
+    # Generate the cloze for the picked word. ``force_word_id`` is
+    # the 5.4-only knob on ``generate_cloze``; the deterministic
+    # seed path stays untouched for the 4.5 ``POST /exercises/cloze``
+    # caller.
+    try:
+        exercise = generate_cloze(
+            db, current_user.id, force_word_id=picked_word_id
+        )
+    except LLMError as exc:
+        logger.error(
+            "exercises/due: LLM transport failure for user_id=%d: %s",
+            current_user.id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"cloze generation failed: {exc}",
+        )
+    except ClozeGenerationError as exc:
+        logger.error(
+            "exercises/due: schema dead-letter for user_id=%d after %d "
+            "attempt(s): %s",
+            current_user.id,
+            exc.schema_retry_count,
+            exc.last_validation_error,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "cloze_generation_failed",
+                "schema_retry_count": exc.schema_retry_count,
+                "last_validation_error": exc.last_validation_error,
+            },
+        )
+    except ValueError as exc:
+        # Corpus inconsistency — the picked word_id is no longer in
+        # the words table. The route picked it from fsrs_cards (a
+        # join that should never go stale) but defensive: surface
+        # 500 so the operator notices.
+        logger.error(
+            "exercises/due: corpus inconsistency for user_id=%d "
+            "word_id=%d: %s",
+            current_user.id,
+            picked_word_id,
+            exc,
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Lock the prompt_template_version (same as POST /exercises/cloze)
+    # and attach the due_from_fsrs discriminator. FastAPI's
+    # ``response_model=schemas.ClozeDueExerciseOut`` validates the
+    # returned dict against the merged Pydantic schema.
+    exercise = exercise.model_copy(
+        update={"prompt_template_version": PROMPT_TEMPLATE_VERSION}
+    )
+    return {
+        **exercise.model_dump(),
+        "due_from_fsrs": due_from_fsrs,
+    }
 
 
 # ---------------------------------------------------------------------------
