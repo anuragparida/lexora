@@ -158,6 +158,19 @@ and a one-sentence rationale. Frontend (`/exercises/cloze`,
 Phase 4.5) renders the sentence with a blank + four randomised
 choices.
 
+**Observability (Phase 4.3).** Every generation calls
+`_trace_cloze(result, metadata, latency_ms)` which emits a
+`cloze.generate` span to the dedicated `lexora` Langfuse project.
+The span metadata follows the contract in
+[`docs/PHASE-4.md`](docs/PHASE-4.md) §"The metadata contract"
+(`user_id`, `weakness_axes`, `word_id`, `difficulty`, `model_id`,
+`prompt_template_version`, `schema_retry_count`, `latency_ms`,
+`prompt_tokens`, `completion_tokens`). If `LANGFUSE_*_KEY` env vars
+are missing, the trace path is a no-op — graceful degradation,
+the activity still succeeds. Phase 5 reads the same keyset for the
+FSRS grading loop; lock the contract here so the Phase 5
+migration isn't needed.
+
 **Curl:**
 
 ```bash
