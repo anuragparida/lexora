@@ -552,3 +552,224 @@ class ClozeDueExerciseOut(ClozeExerciseOut):
             "and created a new Learning row inline (first encounter)."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.4 — Shared exercise fields + comprehension wire shape
+# (card t_8556fc97)
+#
+# Phase 6.4 lands the comprehension exercise type. The shared wire
+# fields documented in ``docs/PHASE-6.md`` §"The exercise-type wire"
+# live on ``BaseExerciseFields`` so Phase 6.2 (matching), 6.4
+# (comprehension), and the future Phase 6.1 (cloze-with-RAG) can all
+# subclass a single base. This keeps ``exercise_type`` and the
+# activity-boundary metadata in one place — the alternative (each
+# type re-declaring the same fields) would mean a future schema
+# bump needs three separate edits and a per-type test.
+#
+# Note: the shared fields here are the **server-side** wire contract
+# only. The actual generator Pydantic models
+# (``app.cloze.ClozeExercise``, ``app.comprehension.ComprehensionExercise``)
+# are separate — the generator side is the *instructor* contract (what
+# the LLM is asked to produce); the schema side is the *wire* contract
+# (what the route returns). The split mirrors the Phase 4.2 /
+# Phase 5.2 pattern: ``app.cloze`` owns the generator, ``app.schemas``
+# owns the wire.
+# ---------------------------------------------------------------------------
+
+
+class BaseExerciseFields(BaseModel):
+    """Fields shared by every exercise-type wire response.
+
+    The comprehension response (6.4) subclasses this directly. The
+    matching response (6.2) will subclass this too — when 6.2 lands
+    the change is ``class MatchingExerciseOut(BaseExerciseFields)``
+    plus the matching-specific fields, and the ``exercise_type``
+    discriminator on the subclass narrows to ``Literal["matching"]``.
+
+    Pydantic v2 makes subclassing a clean extension path: each
+    concrete type re-declares ``exercise_type`` with a narrower
+    Literal so the wire surface carries the precise discriminator
+    value, not the union.
+    """
+
+    exercise_type: Literal["cloze", "matching", "comprehension"]
+    target_word_id: int = Field(
+        ...,
+        description=(
+            "FK to words.id of the target word the exercise was "
+            "built around. Same id re-appears on the grade_logs row "
+            "when the user grades this exercise."
+        ),
+    )
+    prompt_template_version: str = Field(
+        ...,
+        description=(
+            "Module constant ('comprehension-v1' for 6.4, 'match-v1' "
+            "for 6.2, 'cloze-v1' for 4.2). Bumped on prompt change; "
+            "used as the A/B key by the Phase 6.7 Ragas eval runner."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.4 — Comprehension exercise request / response
+# (card t_8556fc97)
+#
+# Mirrors ``app.comprehension.ComprehensionExercise`` field-for-field,
+# the same split as Phase 4.2's ``ClozeExerciseOut`` /
+# ``app.cloze.ClozeExercise``: the *generator* contract on the
+# instructor side, the *wire* contract on the response_model side.
+#
+# Hard rule #3 (Phase 6 hard rules): three exercise types only.
+# ``exercise_type: Literal["comprehension"] = "comprehension"`` on
+# the response narrows the discriminator — the union on
+# ``BaseExerciseFields`` is wider so the base model is reusable
+# across the three concrete types.
+#
+# Hard rule #1: ``ComprehensionGenerateRequest.enable_rag: bool = False``
+# by default. RAG-on stays opt-in. The route layer in 6.5 will pass
+# this through to ``generate_comprehension``. There is no ``count``
+# knob on this type — comprehension generates one passage + one
+# question per call (mirroring cloze, not matching).
+# ---------------------------------------------------------------------------
+
+
+ComprehensionChoice = Literal["A", "B", "C", "D"]
+
+
+class ComprehensionExerciseOut(BaseExerciseFields):
+    """Response shape for ``POST /exercises/comprehension`` (Phase 6.5).
+
+    The comprehension wire surface: a 3-5 sentence German passage
+    on the target word's topic, a multiple-choice question with
+    four options A-D, the correct answer key, and a one-sentence
+    rationale explaining the design.
+
+    Field bounds (locked by the card body):
+
+    - ``passage``: 3-5 sentences, 20..600 chars. The LLM prompt's
+      prohibitions are load-bearing here — without them the model
+      drifts toward longer, multi-paragraph passages that the
+      frontend can't render in the study-session card.
+    - ``question``: 5..300 chars. The comprehension prompt asks
+      for ONE question, not a battery — the frontend renders the
+      passage above, the question below, and the four choices in
+      a grid.
+    - ``choices``: all four keys A/B/C/D required, each 1..200 chars.
+      The Pydantic ``min_length=4, max_length=4`` on the dict
+      enforces the four-options invariant; ``min_length=1,
+      max_length=200`` on each value bounds the choice text. A
+      missing key is a validation error, not a default — a future
+      maintainer who forgets one of the keys gets a 422 on the
+      dead-letter path.
+    - ``correct_choice``: ``Literal["A", "B", "C", "D"]`` — the
+      answer key, not the index. The frontend uses it to mark the
+      correct answer after the user submits.
+    - ``rationale``: 1..400 chars. One sentence explaining the
+      distractor design — what semantic axis separates the correct
+      answer from the wrong ones, so a hand-reviewer can verify
+      the model isn't a coin flip.
+    """
+
+    exercise_type: Literal["comprehension"] = "comprehension"
+    passage: str = Field(
+        ...,
+        min_length=20,
+        max_length=600,
+        description=(
+            "3-5 sentence German passage on the target word's topic. "
+            "Bounded 20..600 chars so the frontend can render the "
+            "passage in a single study-session card without scrolling."
+        ),
+    )
+    question: str = Field(
+        ...,
+        min_length=5,
+        max_length=300,
+        description=(
+            "ONE multiple-choice question whose answer is grounded in "
+            "the passage. The frontend renders the question below the "
+            "passage and the four choices in a grid."
+        ),
+    )
+    choices: Dict[ComprehensionChoice, str] = Field(
+        ...,
+        min_length=4,
+        max_length=4,
+        description=(
+            "All four keys A/B/C/D required. Each value 1..200 chars. "
+            "Pydantic enforces the key set; a missing key is a 422."
+        ),
+    )
+    correct_choice: ComprehensionChoice = Field(
+        ...,
+        description=(
+            "The correct answer key. NOT an index — the frontend "
+            "uses this directly to mark the right answer."
+        ),
+    )
+    rationale: str = Field(
+        ...,
+        min_length=1,
+        max_length=400,
+        description=(
+            "One sentence (1..400 chars) explaining the distractor "
+            "design — what semantic axis separates the correct "
+            "answer from the three wrong ones."
+        ),
+    )
+
+    @field_validator("choices")
+    @classmethod
+    def _validate_choices(cls, v: Dict) -> Dict:
+        """Per-value length validation on ``choices``.
+
+        Pydantic v2's ``min_length`` / ``max_length`` on a
+        ``dict`` field validate the *number of keys* (4 here),
+        not the per-value length. This validator closes that
+        gap: each value must be a non-empty string bounded
+        ``[1, 200]`` chars. The generator side
+        (``app.comprehension.ComprehensionExercise``) has the
+        same validator; the wire side mirrors it so the
+        two surfaces stay byte-equivalent on validation
+        behaviour.
+        """
+        if not isinstance(v, dict):
+            raise ValueError("choices must be a dict mapping A/B/C/D to a string")
+        for key, value in v.items():
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"choices[{key!r}] must be a string; got {type(value).__name__}"
+                )
+            if len(value) < 1:
+                raise ValueError(
+                    f"choices[{key!r}] must be at least 1 char; got {len(value)}"
+                )
+            if len(value) > 200:
+                raise ValueError(
+                    f"choices[{key!r}] must be at most 200 chars; got {len(value)}"
+                )
+        return v
+
+
+class ComprehensionGenerateRequest(BaseModel):
+    """Request body for ``POST /exercises/comprehension`` (Phase 6.5).
+
+    Comprehension doesn't have a ``count`` knob (one passage + one
+    question per call, mirroring cloze). The only field is the
+    RAG-on opt-in flag, same shape as the cloze request (6.1) and
+    the matching request (6.2).
+    """
+
+    enable_rag: bool = Field(
+        default=False,
+        description=(
+            "Opt-in flag for retrieval-augmented prompting. When "
+            "True, the comprehension generator calls /retrieve for "
+            "the target word and embeds the chunks in the user-side "
+            "JSON. When False (default), the prompt template is "
+            "byte-for-byte identical to the no-RAG path — git-diff "
+            "test asserts this in test_comprehension.py."
+        ),
+    )
