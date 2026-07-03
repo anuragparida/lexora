@@ -1107,16 +1107,33 @@ def test_optimize_match_module_runs_offline(monkeypatch):
 
 
 def test_matching_exercise_out_is_base_plus_pairs():
-    """``MatchingExerciseOut`` is ``BaseExerciseFields`` + ``pairs``.
-    The discriminator / version / target_id keyset lives in the
-    mixin; the matching-specific payload is ``pairs``.
+    """``MatchingExerciseOut`` extends ``BaseExerciseFields`` with
+    ``pairs`` + a server-minted ``exercise_id`` field.
+
+    Phase 6.3 reconcile: 6.2 originally placed ``exercise_id`` on
+    ``BaseExerciseFields`` (the narrower, matching-only Literal
+    union), and the test asserted the subclass field set was the
+    base + ``{pairs}``. Phase 6.4 widened ``BaseExerciseFields`` to
+    the 3-way ``Literal["cloze", "matching", "comprehension"]``
+    union and dropped ``exercise_id`` from the shared mixin
+    (comprehension wires don't need it on the read side; it's
+    only required on the matching wire for round-trip into
+    ``/exercises/grade``). The merge therefore moves
+    ``exercise_id`` to ``MatchingExerciseOut`` itself so the
+    matching route still carries the server-minted id the
+    grader expects.
     """
     from app.schemas import MatchingExerciseOut, BaseExerciseFields
 
     base_fields = set(BaseExerciseFields.model_fields.keys())
     subclass_fields = set(MatchingExerciseOut.model_fields.keys())
-    assert subclass_fields == base_fields | {"pairs"}
+    # Subclass = base + {"pairs", "exercise_id"}; the matching
+    # response narrows ``exercise_type`` from the union on the
+    # base down to the matching branch, which the field set
+    # check handles as a no-op (same key, narrower annotation).
+    assert subclass_fields == base_fields | {"pairs", "exercise_id"}
     assert "pairs" in subclass_fields
+    assert "exercise_id" in subclass_fields
 
 
 def test_matching_exercise_out_rejects_pairs_below_min():

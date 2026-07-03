@@ -641,6 +641,151 @@ def generate_cloze_exercise(
 
 
 # ---------------------------------------------------------------------------
+# Phase 6.3 — ``POST /exercises/match`` (card t_39d85400)
+#
+# Wire surface for the matching generator (Phase 6.2's
+# ``app.match.generate_match``). The route is intentionally thin:
+# body validation, generator call, error translation, response
+# stamping. All prompt + RAG + Langfuse logic lives in
+# ``app.match``.
+#
+# Wire contract:
+#   - 401: missing / invalid JWT (raised by ``get_current_user``).
+#   - 422: Pydantic validation error (FastAPI default for the
+#     ``MatchGenerateRequest`` body — ``count`` out of [2, 8] lands
+#     here, NOT in our handler).
+#   - 502: LLM transport failure (``LLMError``) or persistent schema
+#     violation (``MatchingGenerationError``). The body carries the
+#     structured fields so an operator can triage without re-running.
+#   - 500: corpus inconsistency (e.g. ``select_target_word`` raised
+#     ``ValueError`` because the mapped ``word_type`` has zero rows).
+#   - 200 + ``MatchingExerciseOut`` otherwise.
+#
+# Hard rule surface (from card body):
+#   - #1 RAG-on is opt-in (read from body, default ``False``).
+#   - #2 ``/retrieve`` is consumed as-is (the generator owns the
+#     retrieval helper, not the route).
+#   - #3 ``exercise_type`` discriminator is ``Literal["matching"]``
+#     — stamped at response time by the schema default.
+#   - #5 every state-mutating call is traced — ``generate_match``
+#     owns the ``_trace_match`` call; the route doesn't add a second
+#     wrapper.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/exercises/match", response_model=schemas.MatchingExerciseOut)
+def generate_match_exercise(
+    payload: schemas.MatchGenerateRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Generate one matching exercise for the logged-in learner.
+
+    Body: ``MatchGenerateRequest`` — ``count`` (default 4, in
+    [2, 8]) and ``enable_rag`` (default ``False``). The server
+    picks the target word via ``select_target_word`` and builds the
+    rest.
+
+    The route mirrors ``POST /exercises/cloze``: thin handler,
+    imports ``app.match`` lazily so the module-level ``main.py``
+    stays import-cheap, locks ``prompt_template_version`` on the
+    way out, and stamps a server-minted ``exercise_id`` so the same
+    id re-appears on the future ``grade_logs`` row for Ragas join
+    determinism.
+    """
+    import os
+
+    from app.match import (
+        MatchingGenerationError,
+        PROMPT_TEMPLATE_VERSION,
+        generate_match,
+    )
+    from app.llm import LLMError
+
+    try:
+        exercise = generate_match(
+            db,
+            current_user.id,
+            count=payload.count,
+            enable_rag=payload.enable_rag,
+        )
+    except LLMError as exc:
+        logger.error(
+            "match: LLM transport failure for user_id=%d "
+            "count=%d enable_rag=%s: %s",
+            current_user.id,
+            payload.count,
+            payload.enable_rag,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"match generation failed: {exc}",
+        )
+    except MatchingGenerationError as exc:
+        # The trace is already recorded by ``generate_match`` before
+        # it raises; we don't call ``_trace_match`` a second time.
+        # ``exercise`` is unbound in this branch (the exception fired
+        # before the assignment); log the trace metadata the dead-letter
+        # carries instead of guessing the target.
+        logger.error(
+            "match: schema dead-letter for user_id=%d count=%d "
+            "enable_rag=%s after %d attempt(s): %s",
+            current_user.id,
+            payload.count,
+            payload.enable_rag,
+            exc.schema_retry_count,
+            exc.last_validation_error,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "match_generation_failed",
+                "schema_retry_count": exc.schema_retry_count,
+                "last_validation_error": exc.last_validation_error,
+            },
+        )
+    except ValueError as exc:
+        # Corpus inconsistency (e.g. axis-mapped word_type has zero
+        # rows, or ``force_word_id`` doesn't resolve). 500 — operator
+        # needs to look at the seed data.
+        logger.error(
+            "match: corpus inconsistency for user_id=%d: %s",
+            current_user.id,
+            exc,
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Stamp the wire-only fields: ``exercise_id`` (server-minted per
+    # generation, mirrors Phase 6.6's plan to re-use it on the
+    # ``grade_logs`` row) and ``exercise_type`` (the
+    # ``BaseExerciseFields`` default already sets this to
+    # ``"matching"``). Lock ``prompt_template_version`` on the way
+    # out so a future ``generate_match`` that forgets to set it
+    # can't desync the contract.
+    #
+    # Round-trip through ``model_dump`` / ``model_validate`` so a
+    # generator-side ``app.match.MatchingPair`` (the nested-model
+    # class the instructor layer validates against) and a
+    # wire-side ``app.schemas.MatchingPair`` (the one FastAPI's
+    # ``response_model`` advertises) survive a ``del sys.modules``
+    # test that re-imports ``app.match`` and creates a fresh class
+    # object. Without the round-trip, the nested-model revalidation
+    # would reject the wire build with "Input should be a valid
+    # dictionary or instance of MatchingPair" when the cached
+    # ``app.schemas.MatchingPair`` class identity drifts.
+    exercise_id = int.from_bytes(os.urandom(8), "big", signed=True)
+    return schemas.MatchingExerciseOut.model_validate(
+        {
+            "exercise_id": exercise_id,
+            "target_word_id": exercise.target_word_id,
+            "prompt_template_version": PROMPT_TEMPLATE_VERSION,
+            "pairs": [p.model_dump() for p in exercise.pairs],
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Phase 5.4 — ``GET /exercises/due`` (card t_e8548d6d)
 #
 # The closed study loop's right half. Given an authenticated user,
