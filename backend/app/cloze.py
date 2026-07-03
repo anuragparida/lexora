@@ -62,6 +62,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app import crud, models
+from app.observability import get_langfuse
 from app.diagnostic.questions import ALL_AXES
 
 # Lazy DSPy import — ``dspy`` is heavy and only needed by the
@@ -665,42 +666,107 @@ def _trace_cloze(
     metadata: dict[str, Any],
     latency_ms: int,
 ) -> None:
-    """Phase 4.3 fill-in point: emit one Langfuse span per generation.
+    """Emit one Langfuse ``cloze.generate`` span per generation.
 
-    Phase 4.2 ships this as a no-op so the test suite can run without
-    Langfuse credentials and so the LLM call path is testable
-    independently of observability. The signature is locked — 4.3
-    keeps the same parameter names so the metadata dict shape stays
-    stable across the two cards.
+    Phase 4.2 ships this as a no-op; this card is the real
+    implementation. The signature is locked — ``generate_cloze`` and
+    the dead-letter branch both call us with the same kwargs in the
+    same order, so the Langfuse payload shape stays stable for the
+    Phase 5 readers.
+
+    **SDK choice.** ``pyproject.toml`` pins ``langfuse>=2.50.0,<3.0``
+    (resolved to 2.60.10). The v2 SDK exposes ``client.span(name=...)``
+    returning a span handle; ``span.update(metadata=...)`` merges the
+    dict; ``span.end()`` closes the observation; ``client.flush()``
+    pushes the buffer to the ingestion API. The ``start_as_current_span``
+    context-manager API referenced in the Phase 4 spec doc §4.3 is a
+    v3-only method and is not callable against the v2.60.10 SDK we
+    pinned in the Phase 1 fix card (``t_2e386ba9``) — we mirror
+    ``app.main._trace_retrieval``'s non-context-manager shape here
+    for the same reason.
+
+    **Graceful degradation.** When ``LANGFUSE_PUBLIC_KEY`` /
+    ``LANGFUSE_SECRET_KEY`` are missing, ``get_langfuse()`` returns
+    ``None`` (Phase 0's design; see ``app.observability``). In that
+    branch we early-return so the cloze activity still succeeds —
+    observability is best-effort, never blocking. We log a warning
+    once at module-import time (``observability.py``) instead of
+    spamming on every call.
+
+    **Metadata contract.** Phase 5 reads these fields; we populate
+    exactly the keyset documented in ``docs/PHASE-4.md`` §"The
+    metadata contract". Phase 4.2's ``generate_cloze`` already
+    assembles every required key in the ``metadata`` dict; this
+    function copies the right ones onto the span and ignores the
+    implementation-detail keys (``prompt_messages`` — too verbose
+    for the Langfuse metadata row; we keep it on the trace payload
+    instead so a phase-5 reader that needs the prompt can still
+    get it from the trace record).
+
+    **Failure mode.** Any exception raised by the Langfuse SDK
+    (network glitch, malformed payload, server-side rejection) is
+    caught and logged at WARNING — the cloze generation has already
+    succeeded at this point, so a trace failure must never break the
+    request. The same shape is used by ``_trace_retrieval``.
 
     On success the result is a populated ``ClozeExercise``; on
-    dead-letter (``ClozeGenerationError``) ``result`` is ``None`` and
-    ``metadata["schema_retry_count"]`` carries the failure depth.
-
-    Reference implementation (4.3 will replace this body):
-
-        client = get_langfuse()
-        if client is None:
-            return
-        with client.start_as_current_span(name="cloze.generate") as span:
-            span.update(
-                input=metadata["prompt_messages"],
-                output=result.model_dump_json() if result else None,
-                metadata={
-                    "user_id": metadata["user_id"],
-                    "weakness_axes": metadata["weakness_axes"],
-                    "word_id": metadata["word_id"],
-                    "difficulty": result.difficulty if result else None,
-                    "model_id": metadata["model_id"],
-                    "prompt_template_version": metadata["prompt_template_version"],
-                    "schema_retry_count": metadata["schema_retry_count"],
-                    "latency_ms": latency_ms,
-                    "prompt_tokens": metadata["prompt_tokens"],
-                    "completion_tokens": metadata["completion_tokens"],
-                },
-            )
+    dead-letter (``ClozeGenerationError`` raised upstream) ``result``
+    is ``None`` and ``metadata["schema_retry_count"]`` carries the
+    failure depth. We still emit the span in that case so the
+    failure is visible in Langfuse next to the passing traces.
     """
-    return None
+    client = get_langfuse()
+    if client is None:
+        # Keys missing — already warned at startup. Don't spam per call.
+        return
+
+    # Build the metadata payload exactly per docs/PHASE-4.md §"The
+    # metadata contract". ``prompt_template_version`` comes from
+    # the result when present (it's a Pydantic output field); fall
+    # back to the input dict for the dead-letter branch.
+    ptemplate_version = (
+        getattr(result, "prompt_template_version", None)
+        if result is not None
+        else metadata.get("prompt_template_version")
+    )
+    span_metadata: dict[str, Any] = {
+        "user_id": metadata["user_id"],
+        "weakness_axes": metadata["weakness_axes"],
+        "word_id": metadata["word_id"],
+        "difficulty": getattr(result, "difficulty", None) if result is not None else None,
+        "model_id": metadata["model_id"],
+        "prompt_template_version": ptemplate_version,
+        "schema_retry_count": metadata["schema_retry_count"],
+        "latency_ms": latency_ms,
+        "prompt_tokens": metadata["prompt_tokens"],
+        "completion_tokens": metadata["completion_tokens"],
+    }
+
+    span = None
+    try:
+        span = client.span(
+            name="cloze.generate",
+            # Trace-level input/output so the Langfuse UI surfaces
+            # the prompt + the serialised Pydantic result. v2
+            # ``span`` accepts both kwargs at construction time;
+            # ``update`` is for incremental merges.
+            input=metadata.get("prompt_messages"),
+            output=(result.model_dump_json() if result is not None else None),
+        )
+        span.update(metadata=span_metadata)
+        span.end()
+        # Force a flush so the trace is queryable in the UI before
+        # the request returns — mirrors _trace_retrieval.
+        client.flush()
+    except Exception as exc:  # noqa: BLE001 — tracing must never break the activity
+        logger.warning(
+            "cloze: Langfuse trace failed (non-fatal): %s", exc
+        )
+        if span is not None:
+            try:
+                span.end()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # ---------------------------------------------------------------------------

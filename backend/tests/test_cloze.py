@@ -14,6 +14,13 @@ Coverage map (mirrors the card body's "Tests" section):
    (mocked; this card's implementation is a no-op stub, but the
    signature is locked so 4.3's implementation can swap in without
    changing the call site).
+6b. ``_trace_cloze`` with a mocked Langfuse client records a span
+   carrying every metadata-contract field (Phase 4.3 new).
+6c. ``_trace_cloze`` with keys unset does NOT raise, does NOT
+   contact the network, and does NOT log per-call warnings
+   (Phase 4.3 new).
+6d. ``_trace_cloze`` swallows Langfuse SDK failures so the cloze
+   activity still succeeds (Phase 4.3 new).
 7. No retrieval import — ``app.retrieval`` is NOT in ``sys.modules``
    after ``from app import cloze`` (Hard rule #3 / #4.2 acceptance).
 8. ``POST /exercises/cloze`` requires JWT — no cookie → 401.
@@ -772,6 +779,226 @@ def test_trace_cloze_invoked_on_happy_path(db_session, monkeypatch):
     ):
         assert key in md, f"metadata missing contract key: {key}"
     assert call["latency_ms"] >= 0
+
+
+def test_trace_cloze_metadata_contract_keyset_on_mocked_span(monkeypatch):
+    """Phase 4.3 — when the Langfuse client is non-None, the trace
+    span carries every metadata-contract field exactly once and
+    the contract keyset matches ``docs/PHASE-4.md`` §"The metadata
+    contract" (10 fields).
+
+    We monkeypatch the v2-SDK call shape:
+    ``client.span(name=..., input=..., output=...)`` → MagicMock;
+    ``span.update(metadata=...)`` → records the call;
+    ``span.end()`` → marks closure;
+    ``client.flush()`` → ensures the buffer is sent.
+
+    The mocked client is wired through the freshly-resolved
+    ``app.cloze`` module — ``test_cloze_does_not_import_retrieval``
+    earlier in the suite reloads ``app.cloze`` (via
+    ``del sys.modules["app.cloze"]; import app.cloze``); the
+    module-level ``from app import cloze`` reference in this file
+    is therefore stale by the time we patch, so we re-acquire it
+    inside this test before patching.
+    """
+    from unittest.mock import MagicMock
+    import importlib
+
+    # Re-acquire the live module — earlier tests reload it.
+    cloze_live = importlib.import_module("app.cloze")
+
+    # Build a MagicMock span + client with the v2-SDK shape.
+    mock_client = MagicMock(name="langfuse_client")
+    mock_span = MagicMock(name="langfuse_span")
+    mock_client.span.return_value = mock_span
+
+    # Wire the mock into the cloze module's bound ``get_langfuse``.
+    monkeypatch.setattr(cloze_live, "get_langfuse", lambda: mock_client)
+
+    exercise = ClozeExercise(
+        sentence_with_blank="Der ___ schläft.",
+        answer_word_id=1,
+        distractors=[2, 3, 4],
+        difficulty="easy",
+        rationale="Test.",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
+    )
+    metadata = {
+        "user_id": 42,
+        "weakness_axes": {"verbs": 3, "prepositions": 1},
+        "word_id": 1,
+        "model_id": "qwen/qwen3-235b-a22b-2507",
+        "prompt_template_version": PROMPT_TEMPLATE_VERSION,
+        "prompt_messages": [
+            {"role": "system", "content": "S"},
+            {"role": "user", "content": "U"},
+        ],
+        "schema_retry_count": 0,
+        "prompt_tokens": 30,
+        "completion_tokens": 12,
+    }
+
+    # The function is an idempotent side-effect emitter; return value
+    # is implicitly None.
+    assert cloze_live._trace_cloze(exercise, metadata, latency_ms=42) is None
+
+    # client.span was invoked exactly once with the canonical name.
+    assert mock_client.span.call_count == 1
+    span_kwargs = mock_client.span.call_args.kwargs
+    assert span_kwargs["name"] == "cloze.generate"
+    # input is the prompt messages; output is the serialised exercise.
+    assert span_kwargs["input"] == metadata["prompt_messages"]
+    assert json.loads(span_kwargs["output"]) == json.loads(
+        exercise.model_dump_json()
+    )
+
+    # span.update was invoked at least once with the full metadata keyset.
+    assert mock_span.update.call_count >= 1
+    update_calls = mock_span.update.call_args_list
+    # Concatenate every metadata dict we passed to span.update; find
+    # the one whose keys match the contract.
+    merged: dict = {}
+    for call in update_calls:
+        for key, value in (call.kwargs.get("metadata") or {}).items():
+            merged[key] = value
+
+    expected_keys = {
+        "user_id",
+        "weakness_axes",
+        "word_id",
+        "difficulty",
+        "model_id",
+        "prompt_template_version",
+        "schema_retry_count",
+        "latency_ms",
+        "prompt_tokens",
+        "completion_tokens",
+    }
+    assert set(merged.keys()) == expected_keys, (
+        f"metadata keys drifted: got {set(merged.keys())}, "
+        f"expected {expected_keys}"
+    )
+    # Spot-check field values.
+    assert merged["user_id"] == 42
+    assert merged["weakness_axes"] == {"verbs": 3, "prepositions": 1}
+    assert merged["word_id"] == 1
+    assert merged["difficulty"] == "easy"
+    assert merged["model_id"] == "qwen/qwen3-235b-a22b-2507"
+    assert merged["prompt_template_version"] == PROMPT_TEMPLATE_VERSION
+    assert merged["schema_retry_count"] == 0
+    assert merged["latency_ms"] == 42
+    assert merged["prompt_tokens"] == 30
+    assert merged["completion_tokens"] == 12
+
+    # Span closed and client flushed — required for the QA-hook
+    # visibility acceptance gate ("trace queryable in UI before
+    # request returns").
+    assert mock_span.end.call_count == 1
+    assert mock_client.flush.call_count == 1
+
+
+@respx.mock
+def test_trace_cloze_is_silent_when_keys_missing(monkeypatch, caplog):
+    """Phase 4.3 — when ``LANGFUSE_PUBLIC_KEY`` / ``LANGFUSE_SECRET_KEY``
+    are unset, ``get_langfuse()`` returns None and ``_trace_cloze``
+    returns silently without contacting the network.
+
+    We wrap the test in ``@respx.mock`` so any HTTP request that
+    *would* leak out of the function fails the test (respx raises
+    ``RequestNotCalled`` on un-matched routes). Together with the
+    caplog assertion (one warning from ``observability.py`` at import
+    time, no per-call warnings), this proves the graceful-degrade
+    branch is exercised end-to-end.
+    """
+    import logging
+
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+
+    # exercise is None — the dead-letter branch. The function must
+    # still return None without raising.
+    with caplog.at_level(logging.WARNING, logger="app.observability"):
+        assert cloze._trace_cloze(None, {}, 0) is None
+
+    # exercise populated — happy-path branch with empty metadata.
+    # We must not raise on a missing 'prompt_template_version' key
+    # (the function's ``metadata.get(...)`` tolerates the absence);
+    # supply the keys we do read directly:
+    metadata = {
+        "user_id": 1,
+        "weakness_axes": {},
+        "word_id": 1,
+        "model_id": "stub",
+        "schema_retry_count": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    }
+    exercise = ClozeExercise(
+        sentence_with_blank="Der ___ schläft.",
+        answer_word_id=1,
+        distractors=[2, 3, 4],
+        difficulty="easy",
+        rationale="x",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
+    )
+    assert cloze._trace_cloze(exercise, metadata, latency_ms=0) is None
+
+    # No per-call warnings — observability.py logs once at module
+    # import. caplog may carry the import-time warning depending on
+    # fixture ordering; we only assert no new cloze-side warnings.
+    cloze_warnings = [
+        r for r in caplog.records
+        if r.name == "app.cloze" and r.levelno >= logging.WARNING
+    ]
+    assert cloze_warnings == [], (
+        f"unexpected warnings from app.cloze: "
+        f"{[r.getMessage() for r in cloze_warnings]}"
+    )
+
+    # respx: any un-matched request would have raised. The function
+    # returned without contacting the network.
+    # (no respx.post(...) routes were set up; the mock asserts on
+    # exit that no un-matched routes were hit.)
+
+
+def test_trace_cloze_swallows_langfuse_failures(monkeypatch):
+    """Phase 4.3 — when the Langfuse SDK raises mid-span, the cloze
+    activity still succeeds. Tracing failures must never break the
+    request (same invariant as ``_trace_retrieval``).
+    """
+    from unittest.mock import MagicMock
+    import importlib
+
+    cloze_live = importlib.import_module("app.cloze")
+
+    mock_client = MagicMock(name="langfuse_client")
+    mock_span = MagicMock(name="langfuse_span")
+    mock_client.span.return_value = mock_span
+    mock_client.flush.side_effect = RuntimeError("simulated flush failure")
+
+    monkeypatch.setattr(cloze_live, "get_langfuse", lambda: mock_client)
+
+    exercise = ClozeExercise(
+        sentence_with_blank="Der ___ schläft.",
+        answer_word_id=1,
+        distractors=[2, 3, 4],
+        difficulty="easy",
+        rationale="x",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
+    )
+    metadata = {
+        "user_id": 1,
+        "weakness_axes": {},
+        "word_id": 1,
+        "model_id": "stub",
+        "prompt_template_version": PROMPT_TEMPLATE_VERSION,
+        "prompt_messages": [],
+        "schema_retry_count": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    }
+    # The exception is swallowed; the activity returns cleanly.
+    assert cloze_live._trace_cloze(exercise, metadata, latency_ms=0) is None
 
 
 # ---------------------------------------------------------------------------
