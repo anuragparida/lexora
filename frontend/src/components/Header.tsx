@@ -94,6 +94,12 @@ export function Header() {
               >
                 Run diagnostic
               </Link>
+              <Link
+                to="/exercises/cloze"
+                className="px-3 py-1.5 text-sm text-slate-300 hover:text-slate-100 transition-colors"
+              >
+                Cloze
+              </Link>
               <button
                 type="button"
                 onClick={handleLogout}
