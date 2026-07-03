@@ -773,3 +773,109 @@ class ComprehensionGenerateRequest(BaseModel):
             "test asserts this in test_comprehension.py."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.2 / 6.3 — Matching exercise request / response
+# (cards t_ddaf9cf9, t_39d85400)
+#
+# Wire contract for ``POST /exercises/match`` (the route ships in 6.3).
+# Mirrors the comprehension wire shape (6.4): the response subclasses
+# ``BaseExerciseFields`` and adds matching-specific fields. ``exercise_id``
+# lives on the matching subclass only — it was in 6.2's narrower
+# ``BaseExerciseFields`` but 6.4 widened the base to the 3-way Literal
+# and dropped per-type bookkeeping from the shared mixin. The
+# comprehension-side 6.5 will add it back on ``ComprehensionExerciseOut``
+# to round-trip into ``/exercises/grade`` (Phase 6.6's ``ExerciseType``
+# dispatch).
+# ---------------------------------------------------------------------------
+
+# Re-export ``MatchingPair`` from ``app.match`` so the wire schema and
+# the generator contract reference the same Pydantic model. The split
+# between ``app.schemas`` and ``app.match`` is a module-organisation
+# convention; the Pydantic model itself must be the same so a
+# response built from the generator's ``MatchingExercise`` validates
+# against the wire's ``MatchingExerciseOut`` without an adapter step.
+#
+# The wire-side class adds Pydantic ``Field(...)`` descriptions that
+# don't appear on the generator-side class (so a frontend consumer
+# reading the OpenAPI doc gets the description text). The shape —
+# ``left_word_id`` / ``right_word_id`` / ``right_kind`` — is identical,
+# so the two classes are interchangeable for instance-vs-instance
+# assignment.
+from app.match import MatchingPair  # type: ignore  # noqa: E402,F401  (re-export)
+
+
+class MatchingExerciseOut(BaseExerciseFields):
+    """Response shape for ``POST /exercises/match`` (Phase 6.3 route).
+
+    ``pairs`` is always in ``[MATCH_MIN_COUNT, MATCH_MAX_COUNT]`` — the
+    Pydantic model ``MatchingExercise`` in ``app.match`` enforces the
+    same bounds on the generator side, so the wire is the mirror of
+    the generator contract.
+
+    ``exercise_id`` is server-minted per generation
+    (``int.from_bytes(os.urandom(8), "big", signed=True)``). The same
+    id re-appears on the ``grade_logs`` row for the same exercise so
+    the Ragas join is deterministic (Phase 6.7 follow-up). Mirrors
+    the ``GradeRequest.exercise_id: int`` discriminator on the write
+    side.
+    """
+
+    exercise_type: Literal["matching"] = "matching"
+    exercise_id: int = Field(
+        ...,
+        description=(
+            "Server-minted per generation: "
+            "int.from_bytes(os.urandom(8), 'big', signed=True). "
+            "The same id re-appears on the grade_logs row for the "
+            "same exercise so the Ragas join is deterministic."
+        ),
+    )
+    pairs: list[MatchingPair] = Field(
+        ...,
+        min_length=2,
+        max_length=8,
+        description=(
+            "Match pairs the user connects (left -> right). Length "
+            "is bounded in [MATCH_MIN_COUNT=2, MATCH_MAX_COUNT=8] by "
+            "the generator; the wire constraint mirrors it so a "
+            "validation drift surfaces as 422, not as a runtime "
+            "shape mismatch."
+        ),
+    )
+
+
+# These bounds mirror the generator's hard-coded module constants in
+# ``app.match`` (Hard rule #9: type-level guardrails, not env). The
+# Pydantic field uses them directly so a drift between the two
+# modules is a test failure, not a silent footgun.
+class MatchGenerateRequest(BaseModel):
+    """Request body for ``POST /exercises/match`` (Phase 6.3 route).
+
+    Mirrors the ``GradeRequest`` shape (Phase 5.2): minimal request
+    body, the server picks the target word via ``select_target_word``
+    and builds the rest. The two knobs the caller can tweak are
+    ``count`` (how many pairs to generate) and ``enable_rag``
+    (RAG-on is opt-in — Hard rule #1).
+    """
+
+    count: int = Field(
+        default=4,
+        ge=2,
+        le=8,
+        description=(
+            "How many match pairs to generate. Must be in [2, 8]. "
+            "Default 4. Out-of-range values are rejected at the "
+            "Pydantic layer (422)."
+        ),
+    )
+    enable_rag: bool = Field(
+        default=False,
+        description=(
+            "Opt-in flag: True augments the prompt with retrieval "
+            "chunks from the /retrieve endpoint. False (default) "
+            "keeps the prompt byte-for-byte identical to the "
+            "no-RAG fixture so the offline eval stays reproducible."
+        ),
+    )
