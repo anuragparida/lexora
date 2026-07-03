@@ -23,8 +23,10 @@ from pydantic import TypeAdapter, ValidationError
 
 from app.schemas import (
     AuthResponse,
+    BaseExerciseFields,
     ClozeDifficulty,
     ClozeExerciseOut,
+    ClozeGenerateRequest,
     DiagnosticChoiceOut,
     DiagnosticQuestionOut,
     DiagnosticState,
@@ -431,6 +433,15 @@ class TestClozeSchemas:
             "difficulty": "medium",
             "rationale": "default sentence template",
             "prompt_template_version": "cloze-v1",
+            # Phase 6.1 — required shared metadata fields.
+            "target_word_id": 1,
+            "latency_ms": 0,
+            # ``exercise_type`` / ``enable_rag`` / ``trace_id``
+            # have defaults so they don't need to be set, but
+            # the sample includes them for clarity.
+            "exercise_type": "cloze",
+            "enable_rag": False,
+            "trace_id": None,
         }
         data.update(overrides)
         return data
@@ -467,6 +478,259 @@ class TestClozeSchemas:
             ClozeExerciseOut.model_validate(
                 self._sample(distractors=[1, 2, 3, 4])
             )
+
+    def test_exercise_type_discriminator_is_cloze(self):
+        """Phase 6.1 — ``ClozeExerciseOut`` carries the
+        ``exercise_type`` discriminator. Default is ``"cloze"``;
+        any other value (matching / comprehension) is a
+        ``ValidationError`` — the type system is the gate
+        (Hard rule #1 / Plan §"The exercise-type wire").
+        """
+        # Default value (omit from payload) — defaults to "cloze".
+        out = ClozeExerciseOut.model_validate(
+            {k: v for k, v in self._sample().items() if k != "exercise_type"}
+        )
+        assert out.exercise_type == "cloze"
+
+        # Explicit "cloze" — also accepted.
+        out = ClozeExerciseOut.model_validate(
+            self._sample(exercise_type="cloze")
+        )
+        assert out.exercise_type == "cloze"
+
+    def test_exercise_type_matching_is_rejected(self):
+        """Phase 6.1 — the cloze response can only claim
+        ``exercise_type="cloze"``. ``"matching"`` is a 6.2+ field;
+        trying to surface it on the cloze shape is a
+        ``ValidationError`` (defense in depth — the cloze route
+        always stamps ``"cloze"`` itself, but a future maintainer
+        who forgets the stamp gets caught by the schema).
+        """
+        with pytest.raises(ValidationError) as exc:
+            ClozeExerciseOut.model_validate(
+                self._sample(exercise_type="matching")
+            )
+        assert "exercise_type" in str(exc.value)
+
+    def test_target_word_id_must_equal_answer_word_id(self):
+        """Phase 6.1 — ``target_word_id`` is the canonical shared
+        field for cross-exercise-type consumers; on cloze it
+        must equal ``answer_word_id``. A drift is a bug.
+        """
+        with pytest.raises(ValidationError) as exc:
+            ClozeExerciseOut.model_validate(
+                self._sample(answer_word_id=1, target_word_id=2)
+            )
+        assert "target_word_id" in str(exc.value)
+
+    def test_default_enable_rag_is_false(self):
+        """Phase 6.1 — RAG-on is opt-in. The default ``enable_rag``
+        on the response is ``False`` (matches the request default
+        of ``False`` from ``ClozeGenerateRequest``).
+        """
+        # Omit from payload — defaults to False.
+        out = ClozeExerciseOut.model_validate(
+            {k: v for k, v in self._sample().items() if k != "enable_rag"}
+        )
+        assert out.enable_rag is False
+
+        # Explicit True — also accepted (the route stamps it from
+        # the request payload).
+        out = ClozeExerciseOut.model_validate(
+            self._sample(enable_rag=True)
+        )
+        assert out.enable_rag is True
+
+    def test_latency_ms_must_be_non_negative_int(self):
+        """Phase 6.1 — ``latency_ms`` is a required positive-or-zero
+        int. Missing is a ``ValidationError``; floats that aren't
+        whole are too.
+        """
+        with pytest.raises(ValidationError):
+            ClozeExerciseOut.model_validate(
+                {k: v for k, v in self._sample().items() if k != "latency_ms"}
+            )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.1 — ClozeGenerateRequest (card t_616cc266)
+#
+# Spec coverage from the card body §"Tests":
+# - ``ClozeGenerateRequest()`` → default ``enable_rag=False``.
+# - ``ClozeGenerateRequest(enable_rag=True)`` → serialises to
+#   ``{"enable_rag": true}``.
+# - ``ClozeExerciseOut`` JSON includes ``exercise_type: "cloze"``.
+# ---------------------------------------------------------------------------
+
+
+class TestClozeGenerateRequest:
+    """``ClozeGenerateRequest`` shape contract.
+
+    The empty-body case ``{}`` parses to
+    ``ClozeGenerateRequest(enable_rag=False)`` via Pydantic's
+    defaults — that's the Phase 4.5 wire-contract preservation
+    the card body calls out. Existing curl / frontend callers
+    that pass ``{}`` see no change.
+    """
+
+    def test_default_enable_rag_is_false(self):
+        """An empty ``ClozeGenerateRequest()`` defaults
+        ``enable_rag=False`` — the Phase 4.5 contract."""
+        req = ClozeGenerateRequest()
+        assert req.enable_rag is False
+
+    def test_empty_payload_parses_to_default(self):
+        """``{}`` parses to ``enable_rag=False`` (Pydantic default)."""
+        req = ClozeGenerateRequest.model_validate({})
+        assert req.enable_rag is False
+
+    def test_explicit_true_round_trips(self):
+        """``ClozeGenerateRequest(enable_rag=True)`` serialises
+        to ``{"enable_rag": true}`` on the wire."""
+        req = ClozeGenerateRequest(enable_rag=True)
+        assert req.enable_rag is True
+        # ``model_dump`` is the JSON-ready dict; ``model_dump_json``
+        # is the wire string. Both should carry the flag.
+        assert req.model_dump() == {"enable_rag": True}
+        assert req.model_dump_json() == '{"enable_rag":true}'
+
+    def test_explicit_false_round_trips(self):
+        """``ClozeGenerateRequest(enable_rag=False)`` is also
+        accepted (default + explicit agree on the wire)."""
+        req = ClozeGenerateRequest(enable_rag=False)
+        assert req.enable_rag is False
+        assert req.model_dump_json() == '{"enable_rag":false}'
+
+    def test_non_bool_enable_rag_is_rejected(self):
+        """Non-bool ``enable_rag`` (list / dict) is a
+        ``ValidationError``. The type system is the gate — a
+        non-bool container value doesn't sneak through.
+
+        Note: Pydantic v2's default coercion accepts strings
+        (``"true"`` → ``True``), ints (``1`` → ``True``,
+        ``0`` → ``False``), and floats (``1.0`` → ``True``)
+        for bool fields — documented behaviour for
+        JSON-deserialised payloads. Container values (list,
+        dict) ARE rejected, which is what this test asserts.
+        The stringy / numeric coercion is acceptable here
+        because the wire format is JSON, and ``True`` /
+        ``False`` are the canonical JSON bools.
+        """
+        for bad in ([True], {"v": True}, [1, 2], {}):
+            with pytest.raises(ValidationError) as exc:
+                ClozeGenerateRequest(enable_rag=bad)
+            assert "enable_rag" in str(exc.value)
+
+
+class TestClozeExerciseOutJsonShape:
+    """Wire-level assertions on the cloze response.
+
+    Spec: ``ClozeExerciseOut`` JSON includes
+    ``exercise_type: "cloze"`` (the new Phase 6.1 discriminator).
+    """
+
+    def test_json_includes_exercise_type_discriminator(self):
+        """The serialised JSON carries ``exercise_type: "cloze"``
+        at the top level."""
+        out = ClozeExerciseOut.model_validate(
+            {
+                "sentence_with_blank": "Der ___ schläft.",
+                "answer_word_id": 1,
+                "target_word_id": 1,
+                "distractors": [2, 3, 4],
+                "difficulty": "easy",
+                "rationale": "test",
+                "prompt_template_version": "cloze-v1",
+                "latency_ms": 0,
+            }
+        )
+        wire = out.model_dump_json()
+        # The discriminator is a top-level key, not nested.
+        assert '"exercise_type":"cloze"' in wire
+        # And the cloze-specific fields are unchanged.
+        assert '"sentence_with_blank":"Der ___ schläft."' in wire
+        assert '"answer_word_id":1' in wire
+
+    def test_json_includes_enable_rag_flag(self):
+        """The serialised JSON carries ``enable_rag`` (echoed
+        from the request)."""
+        out = ClozeExerciseOut.model_validate(
+            {
+                "sentence_with_blank": "Der ___ schläft.",
+                "answer_word_id": 1,
+                "target_word_id": 1,
+                "distractors": [2, 3, 4],
+                "difficulty": "easy",
+                "rationale": "test",
+                "prompt_template_version": "cloze-v1",
+                "latency_ms": 0,
+                "enable_rag": True,
+            }
+        )
+        wire = out.model_dump_json()
+        assert '"enable_rag":true' in wire
+
+    def test_json_includes_trace_id_when_set(self):
+        """``trace_id`` is ``None`` by default; an explicit
+        string is surfaced on the wire (Phase 4.3 hook returns
+        ``None``; 6.x widens to a real id)."""
+        out = ClozeExerciseOut.model_validate(
+            {
+                "sentence_with_blank": "Der ___ schläft.",
+                "answer_word_id": 1,
+                "target_word_id": 1,
+                "distractors": [2, 3, 4],
+                "difficulty": "easy",
+                "rationale": "test",
+                "prompt_template_version": "cloze-v1",
+                "latency_ms": 0,
+                "trace_id": "abc-123",
+            }
+        )
+        wire = out.model_dump_json()
+        assert '"trace_id":"abc-123"' in wire
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.1 — BaseExerciseFields mixin (card t_616cc266)
+#
+# Verifies the mixin's field set is what Phase 6.2+ (matching)
+# and 6.4+ (comprehension) will inherit. The matching /
+# comprehension cards extend the ``exercise_type`` Literal
+# union — Phase 6.1 ships the cloze branch only.
+# ---------------------------------------------------------------------------
+
+
+class TestBaseExerciseFields:
+    """Mixin field set — the contract Phase 6.2 / 6.4 inherit."""
+
+    def test_cloze_response_carries_all_shared_fields(self):
+        """Every field declared on ``BaseExerciseFields`` is
+        present on a ``ClozeExerciseOut`` instance (mixin
+        inheritance works as documented)."""
+        out = ClozeExerciseOut.model_validate(
+            {
+                "sentence_with_blank": "Der ___ schläft.",
+                "answer_word_id": 1,
+                "target_word_id": 1,
+                "distractors": [2, 3, 4],
+                "difficulty": "easy",
+                "rationale": "test",
+                "prompt_template_version": "cloze-v1",
+                "latency_ms": 0,
+            }
+        )
+        # Shared fields
+        assert out.exercise_type == "cloze"
+        assert out.target_word_id == 1
+        assert out.prompt_template_version == "cloze-v1"
+        assert out.enable_rag is False  # default
+        assert out.trace_id is None  # default
+        assert out.latency_ms == 0
+        # Cloze-specific
+        assert out.sentence_with_blank == "Der ___ schläft."
+        assert out.answer_word_id == 1
+        assert out.distractors == [2, 3, 4]
 
 
 # ---------------------------------------------------------------------------

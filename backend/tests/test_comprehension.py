@@ -1358,6 +1358,9 @@ def test_comprehension_exercise_out_serialises_with_default_exercise_type():
         correct_choice="A",
         rationale="x",
         prompt_template_version="comprehension-v1",
+        enable_rag=False,
+        trace_id=None,
+        latency_ms=0,
     )
     assert out.exercise_type == "comprehension"
     # ``exercise_id`` is a server-minted int; the test passes 42 to

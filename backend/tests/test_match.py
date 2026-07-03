@@ -1164,6 +1164,9 @@ def test_matching_exercise_out_default_payload():
         exercise_id=42,
         target_word_id=1,
         prompt_template_version=PROMPT_TEMPLATE_VERSION,
+        enable_rag=False,
+        trace_id=None,
+        latency_ms=0,
         pairs=[
             MatchingPair(left_word_id=1, right_word_id=2, right_kind="translation"),
             MatchingPair(left_word_id=3, right_word_id=4, right_kind="synonym"),
@@ -1185,20 +1188,48 @@ def test_matching_exercise_out_default_payload():
 
 
 def test_does_not_modify_cloze_observability_fsrs_retrieval_embeddings():
-    """Card acceptance: ``git diff main -- backend/app/cloze.py`` is
-    empty except for the DSPy adapter extraction. ``observability.py``,
-    ``fsrs.py``, ``retrieval.py``, ``embeddings.py`` are unchanged.
-    We assert the diffs against ``main`` are limited to the
-    extraction lines (re-export only).
+    """Card acceptance (Phase 6.2 / t_ddaf9cf9): the diff vs the
+    Phase 5 plan baseline (``540b58b``) for ``backend/app/cloze.py``
+    must be limited to the DSPy adapter re-export; the
+    ``observability.py``, ``fsrs.py``, ``retrieval.py``,
+    ``embeddings.py`` modules must be unchanged from that baseline.
+
+    The previous implementation used ``git diff main`` which
+    produced an empty diff on main (because ``main == HEAD``).
+    Phase 6.9 review (card ``t_032c7ea2``, Major #4) flagged this
+    as a real bug — the test passed vacuously. Pinned against the
+    Phase 5 plan commit so the test asserts a meaningful invariant
+    even when run from a freshly-folded main.
     """
     import subprocess
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parent.parent.parent
 
+    # Phase 5 plan baseline — fixed commit tag instead of ``main``
+    # (which is always HEAD and produces vacuous diffs).
+    BASELINE_COMMIT = "540b58b"
+
     def _diff(file: str) -> str:
+        """Diff ``backend/app/{file}`` for *modifications only*
+        between the Phase 5 plan baseline and HEAD.
+
+        ``--diff-filter=M`` excludes ``A`` (added), ``D``
+        (deleted), ``R`` (renamed), ``C`` (copied), ``T``
+        (type-changed). For the card-acceptance gate we only
+        care about body changes to pre-existing files (i.e.
+        modification of ``observability.py`` / ``fsrs.py`` / etc.
+        introduced in a prior phase). Phase 5.1 adding
+        ``fsrs.py`` won't show up here because it's an ``A``
+        filter, not ``M``.
+        """
         result = subprocess.run(
-            ["git", "diff", "main", "--", f"backend/app/{file}"],
+            [
+                "git", "diff",
+                BASELINE_COMMIT, "HEAD",
+                "--diff-filter=M",
+                "--", f"backend/app/{file}",
+            ],
             capture_output=True,
             text=True,
             cwd=repo_root,
@@ -1206,24 +1237,31 @@ def test_does_not_modify_cloze_observability_fsrs_retrieval_embeddings():
         return result.stdout
 
     # observability.py / fsrs.py / retrieval.py / embeddings.py:
-    # the diff must be empty.
+    # the diff against the Phase 5 plan baseline must be empty.
     for f in ("observability.py", "fsrs.py", "retrieval.py", "embeddings.py"):
         diff = _diff(f)
         assert diff == "", (
-            f"backend/app/{f} must be unchanged for the 6.2 card; "
-            f"got diff:\n{diff}"
+            f"backend/app/{f} must be unchanged from the Phase 5 "
+            f"plan baseline {BASELINE_COMMIT}; got diff:\n{diff}"
         )
 
-    # cloze.py: only the re-export and docstring note.
+    # cloze.py: only the re-export and docstring note + Phase 6.1
+    # RAG-on lines + Phase 6.2 DSPy adapter extraction. The class
+    # definition itself is NOT in cloze.py anymore (it lives in
+    # app.llm).
     cloze_diff = _diff("cloze.py")
-    # The re-export line is the only non-docstring functional diff.
+    # The re-export line is the only non-docstring non-RAG non-Prompt
+    # functional change introduced by Phase 6.2 in the cloze module.
     assert "from app.llm import _DSPyOpenAICompatLM" in cloze_diff, (
         "cloze.py diff should include the DSPy adapter re-export"
     )
     # The class definition itself is NOT in cloze.py anymore.
-    assert "class _DSPyOpenAICompatLM" not in cloze_diff or "class _DSPyOpenAICompatLM" not in [
-        line for line in cloze_diff.splitlines() if line.startswith("+")
-    ], (
+    added_class_lines = [
+        line for line in cloze_diff.splitlines()
+        if line.startswith("+") and "class _DSPyOpenAICompatLM" in line
+    ]
+    assert not added_class_lines, (
         "cloze.py diff should not ADD a new class _DSPyOpenAICompatLM "
-        "definition; the class must live in app.llm now"
+        "definition; the class must live in app.llm now. "
+        f"Got: {added_class_lines}"
     )

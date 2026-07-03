@@ -30,11 +30,14 @@ Hard rules enforced here:
 - #1 cloze only (no matching / comprehension — single exercise type).
 - #2 no ``fsrs_cards`` writes — this module does not import
   ``models.FsrsCard`` and never INSERTs into that table.
-- #3 no retrieval on the cloze path. The word's first example sentence
-  comes from ``Word.examples`` (a relationship on the row), NOT from
-  ``app.retrieval``. Verified by the test that asserts
-  ``app.retrieval`` is not in ``sys.modules`` after ``from app import
-  cloze``.
+- #3 no retrieval on the cloze path BY DEFAULT. The word's first
+  example sentence comes from ``Word.examples`` (a relationship on
+  the row), NOT from ``app.retrieval``. Verified by the test that
+  asserts ``app.retrieval`` is not in ``sys.modules`` after
+  ``from app import cloze``. **Phase 6.1** — RAG-on is opt-in via
+  ``enable_rag=True``; the retrieval call is gated behind that flag
+  and the default ``enable_rag=False`` path still doesn't touch
+  ``app.retrieval``.
 - #4 every LLM call is wrapped — ``_trace_cloze`` is the hook (4.3
   fills in the real Langfuse SDK; this card's no-op keeps tests
   hermetic).
@@ -57,6 +60,10 @@ re-exported below under its old name (``app.cloze._DSPyOpenAICompatLM``)
 for one release so any out-of-tree caller keeps working. New code
 should import from ``app.llm`` directly. ``_configure_dspy`` stays
 here because it pools cloze-specific answer stubs.
+
+**Phase 6.1** — ``RAG_TOP_K``, ``RAG_MAX_CHARS_PER_CHUNK``,
+``RAG_MAX_CHARS`` are module constants too (not env-derived);
+``git grep -n "getenv.*RAG"`` returns nothing by construction.
 """
 from __future__ import annotations
 
@@ -96,6 +103,26 @@ logger = logging.getLogger(__name__)
 
 PROMPT_TEMPLATE_VERSION: str = "cloze-v1"
 MAX_ATTEMPTS: int = 3
+
+# -----------------------------------------------------------------------
+# Phase 6.1 — RAG-on type-level guardrails (Hard rule #9).
+#
+# ``RAG_TOP_K`` is the per-source ``k`` passed to ``app.retrieval.retrieve``
+# (the merged ``both`` result is capped at ``2 * RAG_TOP_K`` by retrieval
+# itself). ``RAG_MAX_CHARS_PER_CHUNK`` truncates each retrieved chunk's
+# text on the way into the prompt so a single giant example doesn't blow
+# past the model's context budget. ``RAG_MAX_CHARS`` is the upper bound
+# on the cumulative ``retrieved_chunks`` text we paste into the user
+# prompt — we stop appending once we'd cross it, even if there are more
+# chunks available.
+#
+# All three are hard-coded module constants (NOT env-derived), per
+# Phase 6 plan §"Hard rules" #9. ``git grep -n "getenv.*RAG"`` returns
+# nothing by construction.
+# -----------------------------------------------------------------------
+RAG_TOP_K: int = 5
+RAG_MAX_CHARS_PER_CHUNK: int = 300
+RAG_MAX_CHARS: int = 1500
 
 
 # Mapping from weakness-profile axis name to ``Word.word_type``. The
@@ -395,9 +422,118 @@ def _first_example_sentence(word: models.Word) -> str:
     return f"{word.word} (Beispiel nicht verfügbar)."
 
 
+def _retrieve_for_cloze(db: Session, word: models.Word) -> list[dict]:
+    """Phase 6.1 — return retrieved chunks for the cloze prompt.
+
+    Uses the word's lemma as the query text. Embeds via the existing
+    ``app.embeddings.embed_one`` (same OpenRouter transport as
+    ``/retrieve``), then calls ``app.retrieval.retrieve`` with
+    ``k=RAG_TOP_K`` and ``source="both"``.
+
+    Graceful degradation
+    --------------------
+    Returns ``[]`` whenever retrieval can't run:
+
+    - Non-Postgres dialect (SQLite has no vector type — same
+      fallback as ``/retrieve``'s 503).
+    - ``app.embeddings.embed_one`` raises ``EmbeddingError`` (no
+      key, provider down, etc.) — we treat the embed call as
+      best-effort and the prompt falls back to non-RAG.
+    - ``app.retrieval.retrieve`` itself raises (e.g. the ``<=>``
+      operator missing on a misconfigured Postgres) — same
+      treatment.
+
+    The caller (``build_prompt``) treats an empty list the same as
+    ``enable_rag=False``: no ``retrieved_chunks`` key in the user
+    prompt, byte-for-byte identical to Phase 4.2. This is the
+    acceptance gate from the Phase 6.1 card.
+    """
+    # Lazy imports keep ``app.cloze`` import-cheap: the Hard rule
+    # #3 / 4.2 acceptance test asserts ``app.retrieval`` is NOT in
+    # ``sys.modules`` after ``from app import cloze``. The retrieval
+    # module IS pulled in here at call time, but only when the
+    # caller actually exercises the RAG-on path — the import
+    # ordering during the test (which never calls this function
+    # for the no-retrieval cases) stays clean.
+    try:
+        from app.embeddings import embed_one, EmbeddingError
+        from app import retrieval
+    except ImportError:
+        return []
+
+    # Non-Postgres — same 503 fallback as ``/retrieve``. We don't
+    # try to import ``app.retrieval._is_postgres_target`` because
+    # that would import the retrieval module at the top of cloze
+    # and break Hard rule #3. The dialect is on the engine, which
+    # cloze already lazily touches in the generation path; one more
+    # ``engine.dialect.name`` read is fine.
+    from app.database import engine
+
+    if engine.dialect.name != "postgresql":
+        return []
+
+    try:
+        query_vec = embed_one(word.word)
+    except EmbeddingError as exc:  # noqa: BLE001 — best-effort fallback
+        logger.warning(
+            "cloze: RAG embed failed (falling back to non-RAG prompt): %s",
+            exc,
+        )
+        return []
+    except Exception as exc:  # noqa: BLE001
+        # Defensive: any unexpected embed failure should never break
+        # the cloze endpoint. Log at warning and fall back.
+        logger.warning(
+            "cloze: RAG embed raised unexpectedly (falling back): %s",
+            exc,
+        )
+        return []
+
+    try:
+        items = retrieval.retrieve(db, query_vec, k=RAG_TOP_K, source="both")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "cloze: RAG retrieve raised (falling back to non-RAG prompt): %s",
+            exc,
+        )
+        return []
+
+    # Project the retrieval rows into the prompt-shape dicts the
+    # spec asks for: ``{kind: "word" | "example", id: int, text: str}``.
+    # Word rows carry the lemma; example rows carry the German
+    # sentence. Score is omitted from the prompt (the LLM doesn't
+    # act on it; the Langfuse trace can log it instead).
+    chunks: list[dict] = []
+    for item in items:
+        kind = item.get("source")  # "words" or "examples"
+        if kind == "words":
+            chunks.append(
+                {
+                    "kind": "word",
+                    "id": int(item["id"]),
+                    "text": str(item.get("word") or ""),
+                }
+            )
+        elif kind == "examples":
+            chunks.append(
+                {
+                    "kind": "example",
+                    "id": int(item["id"]),
+                    "text": str(item.get("german") or ""),
+                }
+            )
+        # Unknown kind — skip. ``retrieval.retrieve`` only emits the
+        # two above, so this branch is dead under the current
+        # contract, but a future ``source`` value (e.g. "sentences")
+        # would land here and degrade gracefully.
+    return chunks
+
+
 def build_prompt(
     word: models.Word,
     weakness_axes: dict[str, int],
+    *,
+    retrieved_chunks: list[dict] | None = None,
 ) -> list[dict]:
     """Build the chat-completions messages for one cloze generation.
 
@@ -424,6 +560,12 @@ def build_prompt(
     - Embeds the user's weakness axes as JSON so the model can lean
       the cloze design toward the axes the learner is weakest on
       (the rationale's signal source).
+    - **Phase 6.1 (RAG-on, opt-in)** — when ``retrieved_chunks`` is
+      non-empty, embeds an additional ``retrieved_chunks`` array.
+      When ``retrieved_chunks`` is ``[]`` (or ``None``), the user
+      prompt is **byte-for-byte identical to Phase 4.2** — a
+      test assertion in ``tests/test_cloze.py`` enforces this.
+      Per the Phase 6 plan Hard rule #1.
 
     Parameters
     ----------
@@ -433,6 +575,15 @@ def build_prompt(
         The dict from ``WeaknessProfile.axes`` (may be empty for a
         fresh user). JSON-encoded verbatim into the user prompt so
         the model sees the same shape the caller serialised.
+    retrieved_chunks
+        Phase 6.1 — optional list of dicts shaped
+        ``{kind: "word" | "example", id: int, text: str}``. When
+        non-empty, appended to the user prompt as
+        ``retrieved_chunks``. When empty (the default), the user
+        prompt shape is unchanged from Phase 4.2. The chunk text
+        is truncated to ``RAG_MAX_CHARS_PER_CHUNK`` characters
+        and the cumulative payload is capped at ``RAG_MAX_CHARS``
+        so the prompt stays bounded under any retrieval result.
 
     Returns
     -------
@@ -465,27 +616,73 @@ def build_prompt(
         '  "prompt_template_version": "cloze-v1"\n'
         "}\n"
     )
-    user_content = json.dumps(
-        {
-            "target_word": {
-                "id": word.id,
-                "word": word.word,
-                "word_type": word.word_type,
-                "frequency": word.frequency,
-            },
-            "context_sentence": example_sentence,
-            "learner_axes": weakness_axes,
-            "instructions": (
+
+    # Phase 6.1 — build the user-prompt payload. When no retrieved
+    # chunks are present, the dict shape is byte-for-byte identical
+    # to Phase 4.2; the test in ``test_cloze.py`` enforces this with
+    # a JSON-bytes comparison against a stored Phase 4.2 fixture.
+    user_payload: dict[str, Any] = {
+        "target_word": {
+            "id": word.id,
+            "word": word.word,
+            "word_type": word.word_type,
+            "frequency": word.frequency,
+        },
+        "context_sentence": example_sentence,
+        "learner_axes": weakness_axes,
+        "instructions": (
+            "Design ONE cloze where the answer is target_word.word "
+            "in context_sentence. The sentence_with_blank must "
+            "embed the target word's form exactly as a C1 learner "
+            "would expect. Pick three distractors of the same "
+            "word_type from the corpus whose semantic field is "
+            "nearby but not identical."
+        ),
+    }
+
+    if retrieved_chunks:
+        # Truncate per-chunk text and stop appending once the
+        # cumulative payload would exceed ``RAG_MAX_CHARS``. This
+        # is the Phase 6 plan Hard rule #9 type-level guardrail
+        # — the constants are module-level, not env-derived.
+        bounded_chunks: list[dict] = []
+        running_chars = 0
+        for chunk in retrieved_chunks:
+            raw_text = str(chunk.get("text") or "")
+            truncated = raw_text[:RAG_MAX_CHARS_PER_CHUNK]
+            # If appending this chunk would bust the cumulative
+            # cap, drop the rest. ``RAG_MAX_CHARS`` is the cap on
+            # the user-prompt payload, not the retrieval result;
+            # the JSON wrapper is a few extra bytes on top of the
+            # chunk text, but it's bounded and small.
+            projected = running_chars + len(truncated)
+            if projected > RAG_MAX_CHARS:
+                break
+            bounded_chunks.append(
+                {
+                    "kind": chunk.get("kind"),
+                    "id": chunk.get("id"),
+                    "text": truncated,
+                }
+            )
+            running_chars = projected
+        if bounded_chunks:
+            user_payload["retrieved_chunks"] = bounded_chunks
+            # When RAG is on, we ALSO tighten the instructions so
+            # the LLM knows to lean on the retrieved context.
+            user_payload["instructions"] = (
                 "Design ONE cloze where the answer is target_word.word "
                 "in context_sentence. The sentence_with_blank must "
                 "embed the target word's form exactly as a C1 learner "
                 "would expect. Pick three distractors of the same "
                 "word_type from the corpus whose semantic field is "
-                "nearby but not identical."
-            ),
-        },
-        ensure_ascii=False,
-    )
+                "nearby but not identical. Use the retrieved_chunks "
+                "to ground the cloze in the user's likely usage "
+                "context — prefer examples from the retrieved set "
+                "over inventing new grammatical structures."
+            )
+
+    user_content = json.dumps(user_payload, ensure_ascii=False)
     return [
         {"role": "system", "content": system_content},
         {"role": "user", "content": user_content},
@@ -524,6 +721,7 @@ def generate_cloze(
     user_id: int,
     *,
     force_word_id: int | None = None,
+    enable_rag: bool = False,
 ) -> ClozeExercise:
     """Generate one ``ClozeExercise`` for a logged-in user.
 
@@ -534,8 +732,18 @@ def generate_cloze(
        set — looks up the specific word id and returns it (Phase 5.4
        ``GET /exercises/due`` mode).
     2. Read the user's weakness axes for the prompt.
-    3. ``build_prompt`` produces the chat messages.
-    4. Wrap an OpenRouter-targeted OpenAI client with ``instructor``
+    3. **Phase 6.1 (RAG-on, opt-in)** — when ``enable_rag=True``,
+       call ``_retrieve_for_cloze`` to pull top-``RAG_TOP_K`` chunks
+       for the word. When ``enable_rag=False`` (default), skip the
+       retrieval call entirely — the prompt stays byte-for-byte
+       identical to Phase 4.2 and the offline eval remains
+       reproducible for A/B comparison. ``retrieved_chunks=[]`` on
+       Postgres failure or non-Postgres dialect degrades gracefully
+       to the same non-RAG prompt (the wire-shape contract is
+       identical, no error to the caller).
+    4. ``build_prompt`` produces the chat messages, taking
+       ``retrieved_chunks`` as a keyword argument.
+    5. Wrap an OpenRouter-targeted OpenAI client with ``instructor``
        and call ``chat.completions.create(response_model=ClozeExercise,
        ..., max_retries=MAX_ATTEMPTS)``. ``instructor`` re-prompts on
        schema violations (each retry counts as one schema-violation
@@ -544,9 +752,11 @@ def generate_cloze(
        ``instructor`` raises ``InstructorRetryException`` after the
        budget is exhausted — we translate that into
        ``ClozeGenerationError`` with the structured fields.
-    5. Stamp ``prompt_template_version`` and the metadata contract
+    6. Stamp ``prompt_template_version`` and the metadata contract
        fields onto the result; call ``_trace_cloze`` (4.3's no-op
-       stub here) with the metadata dict.
+       stub here) with the metadata dict, including the new
+       ``enable_rag`` + ``retrieved_chunk_count`` fields per
+       Phase 6 plan §"The metadata contract".
 
     Parameters
     ----------
@@ -558,6 +768,13 @@ def generate_cloze(
         ``fsrs_cards`` due queue. Defaults to ``None`` — the
         Phase 4.5 ``POST /exercises/cloze`` path stays byte-for-byte
         identical.
+    enable_rag
+        Phase 6.1. When ``True``, retrieval-augment the user prompt
+        with top-``RAG_TOP_K`` chunks for the target word (Postgres
+        + pgvector only; on SQLite or on retrieval failure the
+        prompt silently degrades to non-RAG). When ``False``
+        (default), no retrieval call is made and the prompt is
+        byte-for-byte identical to Phase 4.2.
 
     Returns
     -------
@@ -596,7 +813,22 @@ def generate_cloze(
         else {}
     )
 
-    messages = build_prompt(word, weakness_axes)
+    # Phase 6.1 — RAG-on. Opt-in: when ``enable_rag=False`` the
+    # retrieval call is skipped entirely. When ``enable_rag=True``,
+    # call ``_retrieve_for_cloze``; on Postgres failure (or
+    # non-Postgres dialect), it returns ``[]`` and the prompt
+    # falls back to the non-RAG shape (byte-for-byte identical
+    # to Phase 4.2). The ``retrieved_chunks`` kwarg is then
+    # passed to ``build_prompt``; ``None`` → no-op (no
+    # ``retrieved_chunks`` key in the user prompt).
+    if enable_rag:
+        retrieved_chunks: list[dict] = _retrieve_for_cloze(db, word)
+    else:
+        retrieved_chunks = []
+
+    messages = build_prompt(
+        word, weakness_axes, retrieved_chunks=retrieved_chunks
+    )
 
     # Trace metadata captures the request shape; populated before the
     # call so the error path (ClozeGenerationError raised below) can
@@ -612,6 +844,11 @@ def generate_cloze(
         "schema_retry_count": 0,
         "prompt_tokens": 0,
         "completion_tokens": 0,
+        # Phase 6.1 — RAG-on metadata. Echoed from the request so
+        # downstream eval tooling can split A/B cohorts on
+        # ``enable_rag`` + ``retrieved_chunk_count``.
+        "enable_rag": enable_rag,
+        "retrieved_chunk_count": len(retrieved_chunks),
     }
 
     raw_client = _openai_client()
@@ -815,6 +1052,10 @@ def _trace_cloze(
         "latency_ms": latency_ms,
         "prompt_tokens": metadata["prompt_tokens"],
         "completion_tokens": metadata["completion_tokens"],
+        # Phase 6.1 — RAG-on metadata. Echoed from the request /
+        # retrieval call so Langfuse can split A/B cohorts.
+        "enable_rag": metadata.get("enable_rag", False),
+        "retrieved_chunk_count": metadata.get("retrieved_chunk_count", 0),
     }
 
     span = None
@@ -1186,6 +1427,9 @@ __all__ = [
     "ClozeSignature",
     "MAX_ATTEMPTS",
     "PROMPT_TEMPLATE_VERSION",
+    "RAG_MAX_CHARS",
+    "RAG_MAX_CHARS_PER_CHUNK",
+    "RAG_TOP_K",
     "build_prompt",
     "generate_cloze",
     "optimize_cloze_module",

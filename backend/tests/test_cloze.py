@@ -452,6 +452,501 @@ def test_build_prompt_handles_word_with_no_examples(db_session):
 
 
 # ---------------------------------------------------------------------------
+# 4b. Phase 6.1 — build_prompt RAG-on path (card t_616cc266)
+#
+# Spec coverage from the card body §"Tests":
+# - ``enable_rag=False`` → prompt bytes match a stored fixture
+#   (the Phase 4.2 prompt, no retrieval call).
+# - ``enable_rag=True`` on Postgres → retrieval call fires; prompt
+#   JSON includes ``retrieved_chunks`` with N items.
+# - ``enable_rag=True`` on SQLite → retrieval returns ``[]``; prompt
+#   is the same as ``enable_rag=False``.
+# ---------------------------------------------------------------------------
+
+
+def test_build_prompt_no_chunks_is_byte_identical_to_phase_4_2(db_session):
+    """Phase 6.1 Hard rule #1 — when ``retrieved_chunks`` is
+    empty, the user prompt is **byte-for-byte identical to
+    Phase 4.2's** prompt.
+
+    We build a small Word + example, capture the user-content
+    JSON bytes from ``build_prompt(word, axes)`` (the Phase 4.2
+    signature — no keyword arg), then call
+    ``build_prompt(word, axes, retrieved_chunks=[])`` (the
+    Phase 6.1 signature with the new keyword) and assert the
+    user-content bytes match. This is the git-diff test the
+    card body calls out.
+    """
+    example = "Die Katze schläft auf dem Sofa."
+    wid = _seed_word(
+        db_session,
+        word="schlafen",
+        word_type="Verb",
+        example_de=example,
+    )
+    word = db_session.query(__import__("app").models.Word).get(wid)
+
+    # Phase 4.2 signature.
+    msgs_4_2 = cloze.build_prompt(word, weakness_axes={"verbs": 3})
+    # Phase 6.1 signature with empty chunks — must match.
+    msgs_6_1_empty = cloze.build_prompt(
+        word, weakness_axes={"verbs": 3}, retrieved_chunks=[]
+    )
+    # Same system content; same user content bytes.
+    assert msgs_4_2[0]["content"] == msgs_6_1_empty[0]["content"]
+    assert msgs_4_2[1]["content"] == msgs_6_1_empty[1]["content"]
+
+    # ``retrieved_chunks=None`` (the default) also produces the
+    # same bytes — same prompt path.
+    msgs_6_1_default = cloze.build_prompt(
+        word, weakness_axes={"verbs": 3}
+    )
+    assert msgs_6_1_default[1]["content"] == msgs_4_2[1]["content"]
+
+
+def test_build_prompt_with_chunks_includes_retrieved_chunks_array(
+    db_session,
+):
+    """Phase 6.1 — when ``retrieved_chunks`` is non-empty, the
+    user prompt JSON includes a ``retrieved_chunks`` array with
+    the supplied chunks (truncated to ``RAG_MAX_CHARS_PER_CHUNK``).
+
+    We do NOT call the retrieval layer here — the test exercises
+    the prompt-side contract by passing a hand-built chunks list
+    that mirrors the shape ``_retrieve_for_cloze`` would return
+    on a real Postgres + pgvector call.
+    """
+    wid = _seed_word(
+        db_session,
+        word="schlafen",
+        word_type="Verb",
+        example_de="X schläft.",
+    )
+    word = db_session.query(__import__("app").models.Word).get(wid)
+
+    chunks = [
+        {"kind": "word", "id": 7, "text": "schlafen"},
+        {"kind": "example", "id": 42, "text": "Das Kind schläft ein."},
+    ]
+    msgs = cloze.build_prompt(
+        word, weakness_axes={"verbs": 3}, retrieved_chunks=chunks
+    )
+    user = json.loads(msgs[1]["content"])
+
+    # The retrieved_chunks key is present with the supplied items.
+    assert "retrieved_chunks" in user
+    assert user["retrieved_chunks"] == chunks
+
+    # The base fields are still there.
+    assert user["target_word"]["word"] == "schlafen"
+    assert user["context_sentence"] == "X schläft."
+    assert user["learner_axes"] == {"verbs": 3}
+
+    # And the instructions were tightened for the RAG path.
+    assert "retrieved_chunks" in user["instructions"]
+
+
+def test_build_prompt_truncates_per_chunk_to_max_chars(db_session):
+    """Phase 6.1 — ``RAG_MAX_CHARS_PER_CHUNK`` truncates each
+    chunk's text on the way in. A single chunk with text longer
+    than the cap is truncated; ``kind`` and ``id`` are kept.
+    """
+    wid = _seed_word(
+        db_session,
+        word="Hund",
+        word_type="Noun",
+        example_de="Der Hund schläft.",
+    )
+    word = db_session.query(__import__("app").models.Word).get(wid)
+
+    long_text = "x" * (cloze.RAG_MAX_CHARS_PER_CHUNK + 100)
+    chunks = [{"kind": "example", "id": 1, "text": long_text}]
+    msgs = cloze.build_prompt(word, weakness_axes={}, retrieved_chunks=chunks)
+    user = json.loads(msgs[1]["content"])
+
+    appended = user["retrieved_chunks"][0]
+    assert appended["kind"] == "example"
+    assert appended["id"] == 1
+    assert len(appended["text"]) == cloze.RAG_MAX_CHARS_PER_CHUNK
+
+
+def test_build_prompt_caps_cumulative_payload_to_max_chars(db_session):
+    """Phase 6.1 — ``RAG_MAX_CHARS`` is the cumulative cap on
+    the user prompt's ``retrieved_chunks`` text. Once appending
+    another chunk would exceed the cap, the rest are dropped.
+    """
+    wid = _seed_word(
+        db_session,
+        word="Hund",
+        word_type="Noun",
+        example_de="Der Hund schläft.",
+    )
+    word = db_session.query(__import__("app").models.Word).get(wid)
+
+    # Three chunks of ``RAG_MAX_CHARS_PER_CHUNK`` chars each.
+    # The cap is 1500; the first chunk (300) lands, the second
+    # lands (300, total 600), the third lands (300, total 900),
+    # the fourth would push to 1200 (still under), the fifth
+    # would push to 1500 (still under), the sixth would push to
+    # 1800 → drop. So 5 chunks survive, the 6th and 7th don't.
+    chunk_text = "y" * cloze.RAG_MAX_CHARS_PER_CHUNK
+    chunks = [
+        {"kind": "example", "id": i, "text": chunk_text}
+        for i in range(1, 8)  # 7 chunks
+    ]
+    msgs = cloze.build_prompt(
+        word, weakness_axes={}, retrieved_chunks=chunks
+    )
+    user = json.loads(msgs[1]["content"])
+    # The cap is inclusive — 5 chunks * 300 = 1500, exactly
+    # the cap. The 6th chunk would push to 1800 → drop.
+    assert len(user["retrieved_chunks"]) == 5
+    # And the cumulative text length equals the cap.
+    total = sum(len(c["text"]) for c in user["retrieved_chunks"])
+    assert total == cloze.RAG_MAX_CHARS
+
+
+def test_rag_constants_are_module_level_ints():
+    """Phase 6.1 Hard rule #9 — ``RAG_TOP_K``,
+    ``RAG_MAX_CHARS_PER_CHUNK``, ``RAG_MAX_CHARS`` are
+    hard-coded module constants (NOT env-derived). Their
+    values are locked: a future maintainer who edits them
+    would see the new tests fail before review.
+    """
+    assert cloze.RAG_TOP_K == 5
+    assert cloze.RAG_MAX_CHARS_PER_CHUNK == 300
+    assert cloze.RAG_MAX_CHARS == 1500
+    # Module-level ints (not lazy env reads).
+    assert isinstance(cloze.RAG_TOP_K, int)
+    assert isinstance(cloze.RAG_MAX_CHARS_PER_CHUNK, int)
+    assert isinstance(cloze.RAG_MAX_CHARS, int)
+
+
+def test_retrieve_for_cloze_returns_empty_on_sqlite(db_session, monkeypatch):
+    """Phase 6.1 — on SQLite (no pgvector), ``_retrieve_for_cloze``
+    returns ``[]`` and the prompt falls back to the non-RAG shape.
+
+    The test runs against the per-test SQLite DB (no Postgres),
+    so the dialect check fires and we never reach the embed /
+    retrieve calls.
+    """
+    wid = _seed_word(
+        db_session,
+        word="Hund",
+        word_type="Noun",
+        example_de="Der Hund schläft.",
+    )
+    word = db_session.query(__import__("app").models.Word).get(wid)
+
+    chunks = cloze._retrieve_for_cloze(db_session, word)
+    assert chunks == []
+
+
+def test_retrieve_for_cloze_returns_empty_on_embed_error(
+    db_session, monkeypatch
+):
+    """Phase 6.1 — when ``embed_one`` raises ``EmbeddingError``
+    (e.g. provider down), ``_retrieve_for_cloze`` returns
+    ``[]`` and logs a warning. The cloze endpoint still works.
+
+    We force the embed error path by stubbing
+    ``app.embeddings.embed_one`` so the lazy
+    ``from app.embeddings import embed_one`` inside the function
+    picks up the stub. We also force the dialect check to
+    "postgresql" so the SQLite dev fallback doesn't short-circuit
+    before the embed call.
+    """
+    from app.embeddings import EmbeddingError
+    from app import database as _db
+
+    wid = _seed_word(
+        db_session,
+        word="Hund",
+        word_type="Noun",
+        example_de="Der Hund schläft.",
+    )
+    word = db_session.query(__import__("app").models.Word).get(wid)
+
+    def _raise(*args, **kwargs):
+        raise EmbeddingError("test: provider down")
+
+    # Stub the engine on ``app.database`` so the dialect check
+    # inside ``_retrieve_for_cloze`` sees "postgresql". The real
+    # engine is restored on test teardown.
+    real_engine = _db.engine
+
+    class _FakeEngine:
+        @property
+        def dialect(self):
+            class _D:
+                name = "postgresql"
+            return _D()
+
+    _db.engine = _FakeEngine()
+    try:
+        # Patch ``app.embeddings.embed_one`` on the module
+        # object so the lazy ``from app.embeddings import
+        # embed_one`` inside ``_retrieve_for_cloze`` picks up
+        # the stub.
+        import app.embeddings as _emb
+        real_embed_one = _emb.embed_one
+        _emb.embed_one = _raise
+        try:
+            chunks = cloze._retrieve_for_cloze(db_session, word)
+        finally:
+            _emb.embed_one = real_embed_one
+    finally:
+        _db.engine = real_engine
+    assert chunks == []
+
+
+# ---------------------------------------------------------------------------
+# 5b. Phase 6.1 — generate_cloze enable_rag kwarg
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_generate_cloze_enable_rag_false_skips_retrieval(
+    db_session, monkeypatch
+):
+    """Phase 6.1 — ``enable_rag=False`` (the default) skips the
+    retrieval call entirely. The captured prompt is the
+    non-RAG Phase 4.2 shape.
+    """
+    verb_id = _seed_word(
+        db_session, word="schlafen", word_type="Verb", example_de="X schläft."
+    )
+    _seed_word(db_session, word="gehen", word_type="Verb", example_de="X geht.")
+    _seed_word(db_session, word="kommen", word_type="Verb", example_de="X kommt.")
+    _seed_word(db_session, word="bleiben", word_type="Verb", example_de="X bleibt.")
+    user_id = _seed_user_with_axes(db_session, axes={"verbs": 3})
+
+    route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=Response(
+            200,
+            json=_openai_cloze_response(
+                sentence="Der ___ schläft.",
+                answer_id=verb_id,
+                distractors=[2, 3, 4],
+            ),
+        )
+    )
+
+    monkeypatch.setattr("app.llm.BACKOFF_SCHEDULE_S", (0.0, 0.0, 0.0))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-not-real")
+
+    # The retrieval module must NOT be touched on the non-RAG
+    # path. We patch ``_retrieve_for_cloze`` to fail loudly if
+    # it's called — the test fails on the assertion if the
+    # helper is reached.
+    def _must_not_call(*args, **kwargs):
+        raise AssertionError(
+            "_retrieve_for_cloze called on enable_rag=False path"
+        )
+    monkeypatch.setattr(cloze, "_retrieve_for_cloze", _must_not_call)
+
+    result = cloze.generate_cloze(
+        db_session, user_id, enable_rag=False
+    )
+    assert isinstance(result, ClozeExercise)
+    assert result.sentence_with_blank == "Der ___ schläft."
+    # Exactly one LLM call; no retrieval call.
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_generate_cloze_enable_rag_true_on_sqlite_falls_back(
+    db_session, monkeypatch
+):
+    """Phase 6.1 — ``enable_rag=True`` on SQLite (no pgvector)
+    calls ``_retrieve_for_cloze``, which returns ``[]``, and the
+    prompt falls back to the non-RAG shape.
+    """
+    verb_id = _seed_word(
+        db_session, word="schlafen", word_type="Verb", example_de="X schläft."
+    )
+    _seed_word(db_session, word="gehen", word_type="Verb", example_de="X geht.")
+    _seed_word(db_session, word="kommen", word_type="Verb", example_de="X kommt.")
+    _seed_word(db_session, word="bleiben", word_type="Verb", example_de="X bleibt.")
+    user_id = _seed_user_with_axes(db_session, axes={"verbs": 3})
+
+    # Patch ``_retrieve_for_cloze`` to return a known empty list
+    # and assert it WAS called. (On SQLite the function returns
+    # ``[]`` naturally, but we want to verify the wiring.)
+    def _stub_retrieve(db, word):
+        # Track the call via a side-effect attribute.
+        _stub_retrieve.called = True
+        return []
+
+    monkeypatch.setattr(cloze, "_retrieve_for_cloze", _stub_retrieve)
+
+    route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        return_value=Response(
+            200,
+            json=_openai_cloze_response(
+                sentence="Der ___ schläft.",
+                answer_id=verb_id,
+                distractors=[2, 3, 4],
+            ),
+        )
+    )
+
+    monkeypatch.setattr("app.llm.BACKOFF_SCHEDULE_S", (0.0, 0.0, 0.0))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-not-real")
+
+    result = cloze.generate_cloze(
+        db_session, user_id, enable_rag=True
+    )
+    # The helper was called.
+    assert getattr(_stub_retrieve, "called", False) is True
+    # The LLM call still fires; the prompt is the non-RAG shape.
+    assert route.call_count == 1
+    assert isinstance(result, ClozeExercise)
+
+
+@respx.mock
+def test_generate_cloze_enable_rag_true_on_postgres_includes_chunks(
+    db_session, monkeypatch
+):
+    """Phase 6.1 — ``enable_rag=True`` on a (mocked) Postgres
+    dialect calls ``_retrieve_for_cloze``, which returns
+    chunks; the user prompt JSON includes ``retrieved_chunks``.
+
+    We monkeypatch ``_retrieve_for_cloze`` to return a
+    hand-built chunks list (mirrors what the real
+    Postgres+pgvector call would return), then assert the
+    user-content JSON contains the chunks.
+    """
+    verb_id = _seed_word(
+        db_session, word="schlafen", word_type="Verb", example_de="X schläft."
+    )
+    _seed_word(db_session, word="gehen", word_type="Verb", example_de="X geht.")
+    _seed_word(db_session, word="kommen", word_type="Verb", example_de="X kommt.")
+    _seed_word(db_session, word="bleiben", word_type="Verb", example_de="X bleibt.")
+    user_id = _seed_user_with_axes(db_session, axes={"verbs": 3})
+
+    captured: list[list[dict]] = []
+
+    def _stub_retrieve(db, word):
+        # Return two chunks and capture the call.
+        chunks = [
+            {"kind": "word", "id": 7, "text": "schlafen"},
+            {"kind": "example", "id": 42, "text": "Das Kind schläft ein."},
+        ]
+        captured.append(chunks)
+        return chunks
+
+    monkeypatch.setattr(cloze, "_retrieve_for_cloze", _stub_retrieve)
+
+    sent_prompts: list[list[dict]] = []
+
+    def _record_handler(request):
+        body = json.loads(request.content)
+        sent_prompts.append(body["messages"])
+        return Response(
+            200,
+            json=_openai_cloze_response(
+                sentence="Der ___ schläft.",
+                answer_id=verb_id,
+                distractors=[2, 3, 4],
+            ),
+        )
+
+    route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        side_effect=_record_handler
+    )
+
+    monkeypatch.setattr("app.llm.BACKOFF_SCHEDULE_S", (0.0, 0.0, 0.0))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-not-real")
+
+    result = cloze.generate_cloze(
+        db_session, user_id, enable_rag=True
+    )
+    # The retrieval helper was called.
+    assert len(captured) == 1
+    # The LLM call fired with the augmented prompt.
+    assert route.call_count == 1
+    # The user prompt content carries a JSON prefix (the
+    # ``instructor`` library appends a "Return the correct JSON
+    # response" instruction after the JSON payload, so the
+    # ``content`` field is JSON + a trailing sentence). We
+    # extract the JSON object by finding the matching brace.
+    user_msg = sent_prompts[0][1]
+    raw_content = user_msg["content"]
+    # ``instructor`` appends a string after the JSON; find the
+    # closing ``}`` of the top-level dict and parse the prefix.
+    end_idx = raw_content.rfind("}") + 1
+    user_payload = json.loads(raw_content[:end_idx])
+    assert "retrieved_chunks" in user_payload
+    assert user_payload["retrieved_chunks"] == captured[0]
+    # And the response came back.
+    assert isinstance(result, ClozeExercise)
+
+
+def test_generate_cloze_metadata_carries_enable_rag_and_chunk_count(
+    db_session, monkeypatch
+):
+    """Phase 6.1 — the trace metadata carries ``enable_rag`` and
+    ``retrieved_chunk_count``. We capture the metadata via a
+    fake ``_trace_cloze`` and assert both fields are present
+    and have the expected values.
+    """
+    _seed_word(
+        db_session, word="schlafen", word_type="Verb", example_de="X schläft."
+    )
+    _seed_word(db_session, word="gehen", word_type="Verb", example_de="X geht.")
+    _seed_word(db_session, word="kommen", word_type="Verb", example_de="X kommt.")
+    _seed_word(db_session, word="bleiben", word_type="Verb", example_de="X bleibt.")
+    user_id = _seed_user_with_axes(db_session, axes={"verbs": 3})
+
+    monkeypatch.setattr("app.llm.BACKOFF_SCHEDULE_S", (0.0, 0.0, 0.0))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-not-real")
+
+    payload = json.dumps(
+        {
+            "sentence_with_blank": "Der ___ schläft.",
+            "answer_word_id": 1,
+            "distractors": [2, 3, 4],
+            "difficulty": "easy",
+            "rationale": "x",
+            "prompt_template_version": "cloze-v1",
+        }
+    )
+    monkeypatch.setattr(
+        cloze,
+        "_openai_client",
+        lambda: _make_stub_instructor_client(payload),
+    )
+
+    # Stub the retrieval helper to return a known number of
+    # chunks so we can assert the count.
+    monkeypatch.setattr(
+        cloze,
+        "_retrieve_for_cloze",
+        lambda db, word: [
+            {"kind": "word", "id": 1, "text": "schlafen"},
+            {"kind": "example", "id": 2, "text": "X schläft."},
+            {"kind": "example", "id": 3, "text": "Y schläft."},
+        ],
+    )
+
+    captured: list[dict] = []
+
+    def fake_trace(result, metadata, latency_ms):
+        captured.append(metadata)
+
+    monkeypatch.setattr(cloze, "_trace_cloze", fake_trace)
+    cloze.generate_cloze(
+        db_session, user_id, enable_rag=True
+    )
+
+    assert len(captured) == 1
+    md = captured[0]
+    assert md["enable_rag"] is True
+    assert md["retrieved_chunk_count"] == 3
+
+
+# ---------------------------------------------------------------------------
 # 5. generate_cloze — happy path
 # ---------------------------------------------------------------------------
 
@@ -765,7 +1260,7 @@ def test_trace_cloze_invoked_on_happy_path(db_session, monkeypatch):
     assert len(captured) == 1
     call = captured[0]
     md = call["metadata"]
-    # Every contract field is present.
+    # Every contract field is present (Phase 4.3 + Phase 6.1).
     for key in (
         "user_id",
         "weakness_axes",
@@ -776,16 +1271,27 @@ def test_trace_cloze_invoked_on_happy_path(db_session, monkeypatch):
         "schema_retry_count",
         "prompt_tokens",
         "completion_tokens",
+        # Phase 6.1 — RAG-on metadata. ``enable_rag=False`` because
+        # the test doesn't pass ``enable_rag=True``; the
+        # ``retrieved_chunk_count=0`` follows.
+        "enable_rag",
+        "retrieved_chunk_count",
     ):
         assert key in md, f"metadata missing contract key: {key}"
     assert call["latency_ms"] >= 0
 
 
 def test_trace_cloze_metadata_contract_keyset_on_mocked_span(monkeypatch):
-    """Phase 4.3 — when the Langfuse client is non-None, the trace
-    span carries every metadata-contract field exactly once and
-    the contract keyset matches ``docs/PHASE-4.md`` §"The metadata
-    contract" (10 fields).
+    """Phase 4.3 + Phase 6.1 — when the Langfuse client is
+    non-None, the trace span carries every metadata-contract field
+    exactly once.
+
+    Phase 4.3 ships 10 fields (docs/PHASE-4.md §"The metadata
+    contract"). Phase 6.1 widens the contract with two more:
+    ``enable_rag`` and ``retrieved_chunk_count`` (docs/PHASE-6.md
+    §"The metadata contract"). Both default to ``False`` /
+    ``0`` so the contract stays forward-compatible — earlier
+    call sites that don't know about the RAG-on path still pass.
 
     We monkeypatch the v2-SDK call shape:
     ``client.span(name=..., input=..., output=...)`` → MagicMock;
@@ -836,6 +1342,13 @@ def test_trace_cloze_metadata_contract_keyset_on_mocked_span(monkeypatch):
         "schema_retry_count": 0,
         "prompt_tokens": 30,
         "completion_tokens": 12,
+        # Phase 6.1 — RAG-on metadata defaults. Even when the
+        # caller doesn't pass them, the contract carries them
+        # forward (the trace hook reads them with
+        # ``metadata.get("enable_rag", False)`` so this stays
+        # forward-compatible with call sites that pre-date 6.1).
+        "enable_rag": False,
+        "retrieved_chunk_count": 0,
     }
 
     # The function is an idempotent side-effect emitter; return value
@@ -862,6 +1375,7 @@ def test_trace_cloze_metadata_contract_keyset_on_mocked_span(monkeypatch):
         for key, value in (call.kwargs.get("metadata") or {}).items():
             merged[key] = value
 
+    # Phase 6.1 — 12 fields (10 from Phase 4.3 + 2 from Phase 6.1).
     expected_keys = {
         "user_id",
         "weakness_axes",
@@ -873,6 +1387,8 @@ def test_trace_cloze_metadata_contract_keyset_on_mocked_span(monkeypatch):
         "latency_ms",
         "prompt_tokens",
         "completion_tokens",
+        "enable_rag",
+        "retrieved_chunk_count",
     }
     assert set(merged.keys()) == expected_keys, (
         f"metadata keys drifted: got {set(merged.keys())}, "
