@@ -154,7 +154,58 @@ deviation from the original LLM-generated eval-set spec
 (template-based fallback, since all 28 OpenRouter chat models
 are blocked by the account's data-policy guardrail).
 
-## Cloze generation (Phase 4.2)
+### Ragas regression runner (Phase 6.7)
+
+[`backend/scripts/eval_ragas.py`](backend/scripts/eval_ragas.py)
+scores retrieval + generation against the held-out sets and is
+layered on top of the Phase 4.4 cloze runner as a **regression
+detector on retrieval-augmented prompts** — not the primary
+optimization signal (the Phase 4.4 hand-labeled cloze judgments
+remain primary for the cloze generator; matching + comprehension
+held-out sets mirror the cloze shape with 40 rows each).
+
+Four metrics, all wired in [`backend/app/eval/ragas.py`](backend/app/eval/ragas.py):
+
+- `context_precision` — fraction of retrieved chunks that are
+  actually relevant to the prompt's question.
+- `context_recall` — fraction of the ground-truth supporting
+  context that was retrieved.
+- `faithfulness` — whether the generated answer is grounded in
+  the retrieved chunks (no hallucinated facts).
+- `answer_relevance` — whether the generated answer actually
+  addresses the question.
+
+Per-metric floors are hard-coded module constants
+(`RAGAS_MIN_CONTEXT_PRECISION`, `RAGAS_MIN_FAITHFULNESS`, …) —
+the `git grep -n "getenv.*RAGAS"` invariant holds by construction
+(Hard rule #9). The runner exits non-zero when the overall score
+falls below `RAGAS_DRY_RUN_MIN_OVERALL`.
+
+```bash
+# Offline — no OpenRouter, no Ragas lib, prints OK and exits 0.
+# CI smoke path. Mirrors eval_cloze.py --dry-run.
+cd backend
+uv run python -m scripts.eval_ragas --dry-run
+
+# Live — fires the real Ragas library when RAGAS_API_KEY is set
+# AND `ragas` imports cleanly. The langchain ecosystem is in
+# flux on Python 3.12; if the import fails, the runner falls
+# back to the dry-run proxy with a clear warning (canonical
+# fix documented in docs/EVAL.md as a Phase 6 follow-up).
+RAGAS_API_KEY \
+  uv run python -m scripts.eval_ragas --live
+```
+
+Output lands in `eval/ragas_results.jsonl` (stable symlink to
+the most recent `ragas_results_<timestamp>.jsonl`). Each row
+carries `exercise_id`, the four-metric keyset, the `prompt_template_version`
+A/B key, and the `enable_rag` flag the sample was generated with.
+The `grade_logs.exercise_id` ↔ `ragas_results.exercise_id` join
+is the A/B lift number: compare non-RAG (`enable_rag=False`)
+rows against RAG-on (`enable_rag=True`) rows for the same
+`prompt_template_version` to get the lift signal.
+
+## Cloze generation (Phase 4.2 + Phase 6.1)
 
 `POST /exercises/cloze` returns one fill-in-the-blank exercise
 tailored to the learner's weakness profile. The route is
@@ -163,14 +214,27 @@ auth-gated (cookie session, same as every other authed endpoint).
 **What it does.** Picks a target word deterministically from the
 learner's highest-scoring weakness axis (e.g. `verbs: 3`), builds
 a constrained prompt that includes the word's first example
-sentence from the corpus (no retrieval call — Hard rule #3), and
-sends it to OpenRouter through `instructor` so the response is
-validated against a Pydantic `ClozeExercise` model with bounded
-retries (≤ 3). The response carries the answer word id, three
-distractor word ids of the same word type, the difficulty label,
-and a one-sentence rationale. Frontend (`/exercises/cloze`,
-Phase 4.5) renders the sentence with a blank + four randomised
-choices.
+sentence from the corpus (no retrieval call by default —
+Hard rule #3), and sends it to OpenRouter through `instructor`
+so the response is validated against a Pydantic `ClozeExercise`
+model with bounded retries (≤ 3). The response carries the
+answer word id, three distractor word ids of the same word type,
+the difficulty label, and a one-sentence rationale. Frontend
+(`/exercises/cloze`, Phase 4.5) renders the sentence with a
+blank + four randomised choices.
+
+**RAG-on (opt-in).** The cloze request body carries an
+`enable_rag: bool = False` flag. When `True`, the generator
+augments the prompt with the top-K chunks returned by `/retrieve`
+for the target word (the same Phase 1 endpoint shape — consumed
+as-is, no new retrieval routes). When `False` (the default), the
+prompt template is byte-for-byte identical to the no-RAG fixture
+so the offline eval stays reproducible for A/B comparison.
+`RAG_TOP_K`, `RAG_MAX_CHARS_PER_CHUNK`, and `RAG_MAX_CHARS` are
+hard-coded module constants in `backend/app/cloze.py` — not
+env-derived (Hard rule #9). The RAG-on path emits its retrieval
+metadata (`retrieved_chunks`, `retrieved_chunk_k`) onto the
+Langfuse span so the A/B lift is joinable with `eval/ragas_results.jsonl`.
 
 **Observability (Phase 4.3).** Every generation calls
 `_trace_cloze(result, metadata, latency_ms)` which emits a
@@ -188,9 +252,17 @@ migration isn't needed.
 **Curl:**
 
 ```bash
+# Default — enable_rag=False, byte-for-byte Phase 4.2 prompt.
 curl -s -X POST http://localhost:18700/exercises/cloze \
   -H "Cookie: lexora_session=$LEXORA_SESSION" \
   -b cookies.txt -c cookies.txt | jq .
+
+# RAG-on — augment the prompt with retrieval chunks for the target word.
+curl -s -X POST http://localhost:18700/exercises/cloze \
+  -H "Content-Type: application/json" \
+  -H "Cookie: lexora_session=$LEXORA_SESSION" \
+  -b cookies.txt -c cookies.txt \
+  -d '{"enable_rag": true}' | jq .
 ```
 
 Returns `200` + `ClozeExercise` JSON, or `502` if the schema
@@ -214,6 +286,119 @@ OPENROUTER_API_KEY="$YOUR_OPENROUTER_KEY" uv run python -m scripts.optimize_cloz
 The CLI writes the optimised prompt instructions to
 `backend/app/cloze_optimized.json` (gitignored). The path is
 the production wiring point for Phase 5+.
+
+## Matching generation (Phase 6.2 + Phase 6.3)
+
+`POST /exercises/match` returns one concentration-style
+exercise: N word pairs (default 4, range `[2, 8]`) the user
+connects by dragging each German word to its translation or
+synonym. The route is auth-gated (cookie session, same as every
+other authed endpoint) and is a thin wrapper over
+`backend/app/match.py`'s `generate_match` — all generation logic
+lives in the DSPy module, the route only translates transport
+errors to HTTP and locks `prompt_template_version` on the way out.
+
+**What it does.** Picks a target word deterministically from the
+learner's highest-scoring weakness axis (same `select_target_word`
+helper cloze uses), then asks the LLM to produce `count` pairs
+where each pair is `{left_word_id, right_word_id, right_kind}`
+with `right_kind: Literal["translation", "synonym"]`. The LLM
+sees the target word + the word's first example sentence (no
+retrieval by default — Hard rule #3), and the response is
+validated against a Pydantic `MatchingExercise` model with
+bounded retries (≤ 3). The response shape is `MatchingExerciseOut`
+(subclass of `BaseExerciseFields`) with `exercise_type="matching"`,
+a server-minted `exercise_id` (the same id re-appears on the
+`grade_logs` row for Ragas join determinism), the target word id,
+the `prompt_template_version` (`match-v1`), the `enable_rag` echo,
+and the `pairs` list.
+
+**RAG-on (opt-in).** The request body carries
+`enable_rag: bool = False` and `count: int = 4`. When
+`enable_rag=True`, the generator augments the prompt with
+top-K chunks returned by `/retrieve` for the target word.
+When `False` (the default), the prompt template is
+byte-for-byte identical to the no-RAG fixture so the offline
+eval stays reproducible.
+
+**Curl:**
+
+```bash
+# Default — enable_rag=False, count=4.
+curl -s -X POST http://localhost:18700/exercises/match \
+  -H "Content-Type: application/json" \
+  -H "Cookie: lexora_session=$LEXORA_SESSION" \
+  -b cookies.txt -c cookies.txt \
+  -d '{}' | jq .
+
+# RAG-on, 6 pairs.
+curl -s -X POST http://localhost:18700/exercises/match \
+  -H "Content-Type: application/json" \
+  -H "Cookie: lexora_session=$LEXORA_SESSION" \
+  -b cookies.txt -c cookies.txt \
+  -d '{"count": 6, "enable_rag": true}' | jq .
+```
+
+Returns `200` + `MatchingExerciseOut` JSON, or `422` if `count`
+is outside `[2, 8]` (Pydantic-level rejection), or `502` if the
+schema retries are exhausted (the body carries
+`schema_retry_count` + `last_validation_error` for triage).
+
+## Comprehension generation (Phase 6.4 + Phase 6.5)
+
+`POST /exercises/comprehension` returns one reading-comprehension
+exercise: a 3–5 sentence German passage on the target word's
+topic plus a multiple-choice question with four options A–D.
+The route is auth-gated and mirrors `/exercises/match` and
+`/exercises/cloze` — thin wrapper over
+`backend/app/comprehension.py`'s `generate_comprehension`, all
+generation logic in the DSPy module.
+
+**What it does.** Picks a target word deterministically (same
+`select_target_word` helper cloze + matching use), then asks the
+LLM to produce a `passage` (3–5 sentences, 20–600 chars), a
+`question` (5–300 chars), four `choices` keyed A/B/C/D (each
+1–200 chars), a `correct_choice: Literal["A","B","C","D"]`, and
+a one-sentence `rationale` (1–400 chars). The Pydantic
+`ComprehensionExercise` model enforces all bounds — out-of-range
+fields are rejected at the schema layer, not as a runtime
+mismatch downstream. The response shape is
+`ComprehensionExerciseOut` (subclass of `BaseExerciseFields`)
+with `exercise_type="comprehension"`, the same server-minted
+`exercise_id` shape matching ships, and the
+`prompt_template_version` (`comprehension-v1`).
+
+**RAG-on (opt-in).** The request body carries only
+`enable_rag: bool = False` — no `count` knob (comprehension
+generates one passage + one question per call, mirroring cloze,
+not matching). When `enable_rag=True`, the comprehension
+generator calls `/retrieve` for the target word and embeds the
+chunks in the prompt (and uses a retrieved chunk as the passage
+seed when one is available — falls back to LLM-generated content
+otherwise). When `False` (the default), the prompt template is
+byte-for-byte identical to the no-RAG fixture.
+
+**Curl:**
+
+```bash
+# Default — enable_rag=False.
+curl -s -X POST http://localhost:18700/exercises/comprehension \
+  -H "Content-Type: application/json" \
+  -H "Cookie: lexora_session=$LEXORA_SESSION" \
+  -b cookies.txt -c cookies.txt \
+  -d '{}' | jq .
+
+# RAG-on — passage seeded from a retrieved chunk for the target word.
+curl -s -X POST http://localhost:18700/exercises/comprehension \
+  -H "Content-Type: application/json" \
+  -H "Cookie: lexora_session=$LEXORA_SESSION" \
+  -b cookies.txt -c cookies.txt \
+  -d '{"enable_rag": true}' | jq .
+```
+
+Returns `200` + `ComprehensionExerciseOut` JSON, or `502` if the
+schema retries are exhausted (the body carries
+`schema_retry_count` + `last_validation_error` for triage).
 
 ## Development
 
@@ -257,7 +442,48 @@ pnpm dev
 | POST | `/decks/generate` | Build an `.apkg` deck from filtered words |
 | GET | `/decks/list` | List previously generated decks |
 | GET | `/retrieve?query=&k=&source=` | Top-K nearest neighbours by cosine distance (Phase 1, Postgres + pgvector only) |
-| POST | `/exercises/cloze` | Generate one cloze exercise for the logged-in learner (Phase 4.2; auth-gated) |
+| POST | `/exercises/cloze` | Generate one cloze exercise for the logged-in learner (Phase 4.2 + Phase 6.1; auth-gated; accepts optional `{"enable_rag": bool}` body) |
+| POST | `/exercises/match` | Generate one matching exercise (`count` pairs, default 4, range `[2, 8]`; accepts optional `{"count": int, "enable_rag": bool}` body; Phase 6.2 + Phase 6.3; auth-gated) |
+| POST | `/exercises/comprehension` | Generate one comprehension exercise (3–5 sentence passage + multiple-choice question; accepts optional `{"enable_rag": bool}` body; Phase 6.4 + Phase 6.5; auth-gated) |
+| POST | `/exercises/grade` | Persist a grade for a generated exercise; `exercise_type` widened to `Literal["cloze", "matching", "comprehension"]` in Phase 6.6 (Phase 5.3 route + Phase 6.6 widening; auth-gated) |
+
+## Limitations (Phase 6)
+
+Phase 6 ships the full three-exercise-type study surface with
+retrieval-augmented prompts and a regression-detector eval layer.
+The four honest constraints at this snapshot:
+
+- **RAG-on is opt-in.** Retrieval-augmented prompts are wired on
+  `/exercises/cloze`, `/exercises/match`, and
+  `/exercises/comprehension` via an `enable_rag: bool = False`
+  body field. Default behaviour stays non-RAG so the offline
+  eval stays reproducible for A/B comparison; existing callers
+  see no schema change.
+- **Ragas regression in place.** A Ragas offline runner
+  (`backend/scripts/eval_ragas.py`) scores retrieval + generation
+  against the held-out sets and writes `eval/ragas_results.jsonl`.
+  `--dry-run` exits 0 without contacting the Ragas lib (CI smoke
+  path); `--live` runs the real Ragas library when `RAGAS_API_KEY`
+  is set and the library imports cleanly. The four-metric keyset
+  is `context_precision`, `context_recall`, `faithfulness`,
+  `answer_relevance`; per-metric floors are hard-coded module
+  constants in `backend/app/eval/ragas.py` (Hard rule #9 — no
+  env-derived thresholds).
+- **A/B lift is a regression detector, not the primary signal.**
+  The Phase 4.4 hand-labeled cloze judgments (`eval/cloze_judgments.jsonl`,
+  80 rows across all 7 clozable word types) remain the primary
+  optimization signal for the cloze generator. Ragas lift numbers
+  are reported against the v80 cloze set plus the 40-row matching
+  and 40-row comprehension held-out sets; they catch regressions
+  on retrieval + faithfulness changes without supplanting the
+  hand-labeled grader.
+- **Retrieval-quality disclaimer stands.** Phase 1's retrieval
+  relies on whatever embedding model is currently pinned
+  (OpenRouter `qwen/qwen3-embedding-8b` as of Phase 1, with the
+  original `bge-m3` swap documented as a one-env-var fallback in
+  `NOTES.md`). Phase 6 Ragas makes that quality measurable, not
+  zero — if retrieval quality is poor, the A/B lift will reflect
+  it on `faithfulness` and `context_recall`.
 
 ## Generating Anki decks
 
@@ -285,7 +511,10 @@ lexora/
 │   │   ├── observability.py Langfuse client wrapper
 │   │   ├── anki_builder.py  genanki deck builder with dark CSS
 │   │   ├── llm.py           OpenRouter chat-completions client (Phase 4.1)
-│   │   ├── cloze.py         Cloze exercise generator + DSPy module (Phase 4.2)
+│   │   ├── cloze.py         Cloze exercise generator + DSPy module (Phase 4.2 + Phase 6.1 RAG-on)
+│   │   ├── match.py         Matching exercise generator + DSPy module (Phase 6.2)
+│   │   ├── comprehension.py Comprehension exercise generator + DSPy module (Phase 6.4)
+│   │   ├── eval/            Ragas runner + per-metric floor constants (Phase 6.7)
 │   ├── alembic/             Migrations (baseline = words/examples/verb/fsrs)
 │   ├── data/
 │   │   └── vocabeo_words.db Pre-built SQLite corpus (dev fallback)
