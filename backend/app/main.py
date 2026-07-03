@@ -786,6 +786,156 @@ def generate_match_exercise(
 
 
 # ---------------------------------------------------------------------------
+# Phase 6.5 — ``POST /exercises/comprehension`` (card t_dba4a40c)
+#
+# Wire surface for the comprehension generator (Phase 6.4's
+# ``app.comprehension.generate_comprehension``). The route is
+# intentionally thin: body validation, generator call, error
+# translation, response stamping. All prompt + RAG + Langfuse
+# logic lives in ``app.comprehension``.
+#
+# Wire contract:
+#   - 401: missing / invalid JWT (raised by ``get_current_user``).
+#   - 422: Pydantic validation error (FastAPI default for the
+#     ``ComprehensionGenerateRequest`` body — malformed
+#     ``enable_rag`` types land here, NOT in our handler). The
+#     comprehension request is a single optional ``enable_rag``
+#     bool, so 422 is rare; the matching route's count-bounds
+#     422s do not apply here.
+#   - 502: LLM transport failure (``LLMError``) or persistent schema
+#     violation (``ComprehensionGenerationError``). The body
+#     carries the structured fields so an operator can triage
+#     without re-running.
+#   - 500: corpus inconsistency (e.g. ``select_target_word`` raised
+#     ``ValueError`` because the mapped ``word_type`` has zero
+#     rows).
+#   - 200 + ``ComprehensionExerciseOut`` otherwise.
+#
+# Hard rule surface (from card body):
+#   - #1 RAG-on is opt-in (read from body, default ``False``).
+#   - #2 ``/retrieve`` is consumed as-is (the generator owns the
+#     retrieval helper, not the route).
+#   - #3 ``exercise_type`` discriminator is ``Literal["comprehension"]``
+#     — stamped at response time by the schema default.
+#   - #5 every state-mutating call is traced — ``generate_comprehension``
+#     owns the ``_trace_comprehension`` call; the route doesn't add
+#     a second wrapper.
+#   - #12 Existing callers stay byte-for-byte unchanged. The
+#     generator module is imported lazily inside the handler so the
+#     module-level ``main.py`` stays import-cheap; we never
+#     ``from app.comprehension import ...`` at the top of the file.
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/exercises/comprehension",
+    response_model=schemas.ComprehensionExerciseOut,
+)
+def generate_comprehension_exercise(
+    payload: schemas.ComprehensionGenerateRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Generate one comprehension exercise for the logged-in learner.
+
+    Body: ``ComprehensionGenerateRequest`` — ``enable_rag`` (default
+    ``False``). The server picks the target word via
+    ``select_target_word`` and builds the rest. There is no
+    ``count`` knob — comprehension generates one passage + one
+    question per call (mirrors cloze, not matching).
+
+    The route mirrors ``POST /exercises/match`` and
+    ``POST /exercises/cloze``: thin handler, imports
+    ``app.comprehension`` lazily so the module-level ``main.py``
+    stays import-cheap, locks ``prompt_template_version`` on the
+    way out, and stamps a server-minted ``exercise_id`` so the same
+    id re-appears on the future ``grade_logs`` row for Ragas join
+    determinism (Phase 6.6 + 6.7 follow-up).
+    """
+    import os
+
+    from app.comprehension import (
+        ComprehensionGenerationError,
+        PROMPT_TEMPLATE_VERSION,
+        generate_comprehension,
+    )
+    from app.llm import LLMError
+
+    try:
+        exercise = generate_comprehension(
+            db,
+            current_user.id,
+            enable_rag=payload.enable_rag,
+        )
+    except LLMError as exc:
+        logger.error(
+            "comprehension: LLM transport failure for user_id=%d "
+            "enable_rag=%s: %s",
+            current_user.id,
+            payload.enable_rag,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"comprehension generation failed: {exc}",
+        )
+    except ComprehensionGenerationError as exc:
+        # The trace is already recorded by ``generate_comprehension``
+        # before it raises; we don't call ``_trace_comprehension`` a
+        # second time. ``exercise`` is unbound in this branch (the
+        # exception fired before the assignment); log the trace
+        # metadata the dead-letter carries instead of guessing the
+        # target.
+        logger.error(
+            "comprehension: schema dead-letter for user_id=%d "
+            "enable_rag=%s after %d attempt(s): %s",
+            current_user.id,
+            payload.enable_rag,
+            exc.schema_retry_count,
+            exc.last_validation_error,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "comprehension_generation_failed",
+                "schema_retry_count": exc.schema_retry_count,
+                "last_validation_error": exc.last_validation_error,
+            },
+        )
+    except ValueError as exc:
+        # Corpus inconsistency (e.g. axis-mapped word_type has zero
+        # rows, or ``force_word_id`` doesn't resolve). 500 — operator
+        # needs to look at the seed data.
+        logger.error(
+            "comprehension: corpus inconsistency for user_id=%d: %s",
+            current_user.id,
+            exc,
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Stamp the wire-only fields: ``exercise_id`` (server-minted per
+    # generation, mirrors Phase 6.6's plan to re-use it on the
+    # ``grade_logs`` row) and ``exercise_type`` (the
+    # ``BaseExerciseFields`` default already sets this to
+    # ``"comprehension"``). Lock ``prompt_template_version`` on the
+    # way out so a future ``generate_comprehension`` that forgets to
+    # set it can't desync the contract.
+    exercise_id = int.from_bytes(os.urandom(8), "big", signed=True)
+    return schemas.ComprehensionExerciseOut.model_validate(
+        {
+            "exercise_id": exercise_id,
+            "target_word_id": exercise.target_word_id,
+            "prompt_template_version": PROMPT_TEMPLATE_VERSION,
+            "passage": exercise.passage,
+            "question": exercise.question,
+            "choices": exercise.choices,
+            "correct_choice": exercise.correct_choice,
+            "rationale": exercise.rationale,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Phase 5.4 — ``GET /exercises/due`` (card t_e8548d6d)
 #
 # The closed study loop's right half. Given an authenticated user,
