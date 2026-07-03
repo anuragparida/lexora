@@ -38,6 +38,7 @@ dependencies = [
     "python-multipart>=0.0.12",
     # pydantic[email] enables EmailStr on auth request bodies.
     "email-validator>=2.2.0",
+    "fsrs==4.1.2",
 ]
 
 [tool.uv]

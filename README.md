@@ -82,6 +82,20 @@ should be the actual `sk-lf-...` string in your local `.env` file.
 
 Phase 4 wires the exercise generator (the real Langfuse consumer).
 
+Phase 5 (FSRS spaced repetition) wires the grading loop. The
+scheduler is built on top of [py-fsrs](https://github.com/open-spaced-repetition/py-fsrs)
+**pinned to `fsrs==4.1.2`** (the last release before the v5.x
+breaking change to 21-parameter weights and renamed serializer
+methods). All FSRS hyperparameters — the 19-tuple
+`DEFAULT_PARAMETERS`, `DEFAULT_DESIRED_RETENTION`, learning/relearning
+steps, and `DEFAULT_MAXIMUM_INTERVAL` — live as module constants in
+`backend/app/fsrs.py`. They are never config, never env
+(`git grep -n "getenv.*FSRS\|getenv.*RETENTION"` returns nothing).
+The version pin is asserted on import so a wrong-version install
+fails fast with `RuntimeError("py-fsrs version drift: ...")`. See
+[`backend/app/fsrs.py`](backend/app/fsrs.py) and
+[`docs/PHASE-5.md`](docs/PHASE-5.md) for the locked contract.
+
 ## Embeddings & retrieval (Phase 1)
 
 Every Word and Example row has a 1024-dim embedding (computed
