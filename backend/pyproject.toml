@@ -39,6 +39,23 @@ dependencies = [
     # pydantic[email] enables EmailStr on auth request bodies.
     "email-validator>=2.2.0",
     "fsrs==4.1.2",
+    # Phase 6.7 — Ragas regression detector (card t_bb4e96e0).
+    # The library is lazy-imported by scripts.eval_ragas so the
+    # CI smoke path (--dry-run) doesn't pay the import cost.
+    # The LLM-judge path (--live) is the manual-QA path, not
+    # exercised in CI; it's documented in backend/scripts/eval_ragas.py
+    # and docs/EVAL.md (Phase 6.8 follow-up).
+    #
+    # ``datasets`` is a transitive Ragas dep but the langchain
+    # ecosystem on Python 3.12 is in a state of flux (the
+    # ``langchain_community.chat_models.vertexai`` import path
+    # moves package-to-package across minor versions). We pin
+    # loosely and let the live-path importer fail with a clear
+    # warning + dry-run fallback when the Ragas stack isn't
+    # fully wired (the canonical fix is to install Ragas in
+    # a fresh venv per the docs/EVAL.md manual-QA section).
+    "ragas>=0.2.0,<0.4",
+    "datasets>=2.14.0",
 ]
 
 [tool.uv]

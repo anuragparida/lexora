@@ -11,6 +11,11 @@ build/
 # results_<timestamp>.json files are per-run artifacts that
 # shouldn't clutter git history).
 eval/results_*.json
+# Same for the Ragas runner (Phase 6.7, card t_bb4e96e0). The
+# held-out match + comprehension JSONLs are tracked; the
+# per-run ragas_results_<timestamp>.jsonl files are scratch.
+eval/ragas_results_*.jsonl
+eval/ragas_results.jsonl
 
 # Worktrees (ephemeral)
 wt/
