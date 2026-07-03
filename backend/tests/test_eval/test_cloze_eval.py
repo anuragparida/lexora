@@ -257,7 +257,7 @@ def test_runner_help_exits_0():
         [sys.executable, "-m", "scripts.eval_cloze", "--help"],
         capture_output=True,
         text=True,
-        cwd=Path(__file__).resolve().parent.parent,
+        cwd=Path(__file__).resolve().parent.parent.parent,
     )
     assert result.returncode == 0, (
         f"--help exited {result.returncode}: {result.stderr}"
@@ -274,7 +274,7 @@ def test_runner_dry_run_exits_0_and_prints_ok():
         [sys.executable, "-m", "scripts.eval_cloze", "--dry-run"],
         capture_output=True,
         text=True,
-        cwd=Path(__file__).resolve().parent.parent,
+        cwd=Path(__file__).resolve().parent.parent.parent,
     )
     assert result.returncode == 0, (
         f"--dry-run exited {result.returncode}: {result.stderr}"
