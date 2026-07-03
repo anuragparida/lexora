@@ -2,14 +2,14 @@ import os
 import logging
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import Any, List, Optional, Literal
-from app import auth, crud, models, schemas, anki_builder, bootstrap, retrieval
+from app import auth, crud, fsrs, models, schemas, anki_builder, bootstrap, retrieval
 from app.database import get_db, engine
 from app.diagnostic.routes import router as diagnostic_router
 from app.embeddings import embed_one, EmbeddingError
@@ -848,6 +848,380 @@ def get_due_exercise(
         **exercise.model_dump(),
         "due_from_fsrs": due_from_fsrs,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.3 — ``POST /exercises/grade`` (card t_5160eecf)
+#
+# The closed study loop's left half. The cloze UI (Phase 4.5) and the
+# due-queue endpoint (Phase 5.4) both call this route to record a
+# grade and persist the post-FSRS state.
+#
+# Wire contract:
+#   - Auth: 401 if no / invalid JWT (raised by ``get_current_user``).
+#   - 200 + ``GradeResponse`` JSON on success. The response carries the
+#     next due date, the post-review card state, the FSRS scalars
+#     (stability, difficulty), and the Langfuse ``trace_id`` (or
+#     ``None`` when keys are unset).
+#   - 422 on Pydantic validation failure (out-of-range grade, bad
+#     exercise_type, non-positive exercise_id) — FastAPI default
+#     handler.
+#   - 500 on DB integrity failure (e.g. concurrent insert on the
+#     fsrs_cards unique constraint), with a structured error body.
+#
+# Branching:
+#   - The request body carries only ``grade``; the ``word_id`` is
+#     derived from ``exercise_id`` (for the cloze kind in Phase 5,
+#     the cloze's ``answer_word_id`` is the exercise id — the wire
+#     schema docstring in ``schemas.GradeRequest`` documents this).
+#   - The ``fsrs_cards`` row is looked up by ``word_id``. If no row
+#     exists (first encounter), a fresh Learning row is created
+#     inline (matching the ``/exercises/due`` first-encounter
+#     shape).
+#   - ``apply_grade`` (5.1) computes the post-review Card; the four
+#     columns py-fsrs 4.1.2 doesn't carry (``reps``, ``lapses``,
+#     ``elapsed_days``, ``scheduled_days``) are filled in from the
+#     row's pre-review state + the post-review snapshot.
+#
+# Hard rules enforced here:
+#   1. py-fsrs only (no inline scheduling). All scheduling via
+#      ``apply_grade``.
+#   2. Cloze-only (Literal guardrail on the wire — the route trusts
+#      the schema and does not re-validate).
+#   4. Every grade is traced via ``_trace_grade``; ``trace_id``
+#      propagates to the ``grade_logs`` row.
+#   5. Pydantic v2 validates input; the handler does no extra
+#      validation beyond what the schema enforces.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/exercises/grade", response_model=schemas.GradeResponse)
+def grade_exercise(
+    payload: schemas.GradeRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Apply a 1-4 FSRS grade to the user's card for the cloze's word.
+
+    See the section header above for the full wire contract.
+    """
+    started = time.perf_counter()
+    word_id: int = payload.exercise_id  # cloze: answer_word_id == exercise_id
+
+    # ------------------------------------------------------------------
+    # Step 1: Look up (or create) the fsrs_cards row.
+    # ------------------------------------------------------------------
+    card_row = (
+        db.query(models.FsrsCard)
+        .filter(models.FsrsCard.word_id == word_id)
+        .first()
+    )
+
+    # ``prev_due_at`` for the audit row. For a fresh row it's
+    # ``datetime.utcnow()`` (the moment the inline row is created);
+    # for an existing row it's the row's current ``due_date``. The
+    # audit row uses this for interval-delta observability.
+    if card_row is None:
+        # First-encounter: create a fresh Learning row inline. The
+        # shape mirrors the /exercises/due first-encounter branch.
+        # ``prev_due_at`` is the moment of the grade — there's no
+        # prior schedule.
+        now_for_audit = datetime.utcnow()
+        prev_due_at: datetime = now_for_audit
+        # Initial counters: 0 for everything; py-fsrs will fill
+        # ``stability`` / ``difficulty`` / ``last_review`` on the
+        # first ``review_card`` call.
+        card_row = models.FsrsCard(
+            word_id=word_id,
+            difficulty=None,
+            stability=None,
+            retrievability=None,
+            due_date=now_for_audit,
+            last_review=None,
+            reps=0,
+            lapses=0,
+            state=1,  # py-fsrs State.Learning
+            elapsed_days=0,
+            scheduled_days=0,
+        )
+        db.add(card_row)
+        try:
+            db.flush()  # surface the IntegrityError here, not on commit
+        except IntegrityError:
+            # Concurrent insert beat us to it — re-query and reuse
+            # the winner's row.
+            db.rollback()
+            card_row = (
+                db.query(models.FsrsCard)
+                .filter(models.FsrsCard.word_id == word_id)
+                .first()
+            )
+            if card_row is None:
+                # Extremely unlikely: the row vanished between the
+                # failed insert and the re-query. Surface 500.
+                logger.error(
+                    "grade: fsrs_cards row vanished for word_id=%d after "
+                    "concurrent-insert race",
+                    word_id,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": "fsrs_card_vanished",
+                        "word_id": word_id,
+                    },
+                )
+            # We lost the race — but we have a valid card_row now.
+            # Recompute prev_due_at from the existing row.
+            prev_due_at = card_row.due_date or datetime.utcnow()
+    else:
+        prev_due_at = card_row.due_date or datetime.utcnow()
+
+    # ------------------------------------------------------------------
+    # Step 2: Run the FSRS review.
+    #
+    # The ``fsrs_cards`` row stores ``last_review`` / ``due_date`` as
+    # naive UTC (because ``datetime.utcnow()`` is the project's
+    # convention and SQLAlchemy drops tzinfo on round-trip). py-fsrs
+    # 4.1.2 compares ``review_datetime`` (tz-aware UTC) against
+    # ``card.last_review`` and crashes on naive-vs-aware. We
+    # normalize the card's timestamps to tz-aware UTC in place before
+    # the library call so the comparison stays well-defined.
+    # ------------------------------------------------------------------
+    card = fsrs.row_to_card(card_row)
+    if card.last_review is not None and card.last_review.tzinfo is None:
+        card.last_review = card.last_review.replace(tzinfo=timezone.utc)
+    if card.due is not None and card.due.tzinfo is None:
+        card.due = card.due.replace(tzinfo=timezone.utc)
+    try:
+        new_card, _review_log = fsrs.apply_grade(card, payload.grade)
+    except ValueError as exc:
+        # ``apply_grade`` raises ValueError on out-of-range grades.
+        # The schema's ``Literal[1,2,3,4]`` should have caught this
+        # upstream; this branch is a defence-in-depth fallback.
+        logger.error(
+            "grade: apply_grade rejected payload for user_id=%d word_id=%d "
+            "grade=%d: %s",
+            current_user.id, word_id, payload.grade, exc,
+        )
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # Step 3: Compute the four columns py-fsrs 4.1.2 doesn't carry.
+    #
+    # ``reps`` / ``lapses`` are scalar counters: increment from the
+    # pre-review row. ``scheduled_days`` / ``elapsed_days`` are
+    # deltas derived from the post-review ``card.due`` and
+    # ``card.last_review``.
+    # ------------------------------------------------------------------
+    prev_reps: int = int(card_row.reps or 0)
+    prev_lapses: int = int(card_row.lapses or 0)
+    new_reps: int = prev_reps + 1
+    new_lapses: int = prev_lapses + (1 if payload.grade == 1 else 0)
+
+    # ``scheduled_days`` — the gap from ``last_review`` to the next
+    # due. Both fields are tz-aware UTC after a review.
+    if new_card.last_review is not None and new_card.due is not None:
+        new_scheduled_days: int = (
+            new_card.due - new_card.last_review
+        ).days
+    else:
+        new_scheduled_days = 0
+
+    # ``elapsed_days`` — the gap from the prior due to the current
+    # review. For a fresh card there's no prior schedule, so it's 0.
+    # ``card_row.last_review`` is naive UTC (DB convention) and
+    # ``new_card.last_review`` is tz-aware UTC (py-fsrs convention);
+    # normalize both sides so the subtraction stays well-defined.
+    if (
+        card_row.last_review is not None
+        and new_card.last_review is not None
+    ):
+        prev_last_review = card_row.last_review
+        if prev_last_review.tzinfo is None:
+            prev_last_review = prev_last_review.replace(tzinfo=timezone.utc)
+        new_elapsed_days: int = (
+            new_card.last_review - prev_last_review
+        ).days
+    else:
+        new_elapsed_days = 0
+
+    # ------------------------------------------------------------------
+    # Step 4: UPDATE the fsrs_cards row in place.
+    #
+    # Gotcha #4: every field ``card_to_row_dict`` returns must be
+    # included in the UPDATE so the Python object and the row agree.
+    # We splat ``card_to_row_dict`` then overwrite the four columns
+    # 5.1 leaves as ``None`` with our computed values.
+    # ------------------------------------------------------------------
+    row_dict = fsrs.card_to_row_dict(new_card, word_id)
+    row_dict["reps"] = new_reps
+    row_dict["lapses"] = new_lapses
+    row_dict["elapsed_days"] = new_elapsed_days
+    row_dict["scheduled_days"] = new_scheduled_days
+
+    for col, val in row_dict.items():
+        setattr(card_row, col, val)
+
+    # ------------------------------------------------------------------
+    # Step 5: Build the metadata payload + trace the grade.
+    # ------------------------------------------------------------------
+    latency_ms = int((time.perf_counter() - started) * 1000)
+
+    # The ``trace_id`` placeholder is filled in by ``_trace_grade``
+    # AFTER the span is opened. We assemble the metadata first
+    # (without ``trace_id``) so the span sees the same shape the
+    # audit row sees.
+    metadata: dict[str, Any] = {
+        "user_id": current_user.id,
+        "exercise_id": payload.exercise_id,
+        "exercise_type": payload.exercise_type,
+        "word_id": word_id,
+        "grade": payload.grade,
+        "scheduled_next_due_at": new_card.due,
+        "prev_due_at": prev_due_at,
+        "state": int(new_card.state),
+        "stability": new_card.stability,
+        "difficulty": new_card.difficulty,
+        "reps": new_reps,
+        "lapses": new_lapses,
+        "trace_id": None,  # filled by _trace_grade
+        "latency_ms": latency_ms,
+    }
+
+    trace_id = _trace_grade(
+        metadata=metadata,
+        latency_ms=latency_ms,
+        grade=payload.grade,
+        exercise_id=payload.exercise_id,
+    )
+
+    # ------------------------------------------------------------------
+    # Step 6: INSERT the grade_logs row.
+    # ------------------------------------------------------------------
+    log_row = models.GradeLog(
+        user_id=current_user.id,
+        exercise_id=payload.exercise_id,
+        exercise_type=payload.exercise_type,
+        word_id=word_id,
+        grade=payload.grade,
+        scheduled_next_due_at=new_card.due,
+        prev_due_at=prev_due_at,
+        state=int(new_card.state),
+        stability=float(new_card.stability or 0.0),
+        difficulty=float(new_card.difficulty or 0.0),
+        reps=new_reps,
+        lapses=new_lapses,
+        trace_id=trace_id,
+        latency_ms=latency_ms,
+    )
+    db.add(log_row)
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        logger.error(
+            "grade: DB integrity failure for user_id=%d word_id=%d grade=%d: %s",
+            current_user.id, word_id, payload.grade, exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "grade_log_insert_failed",
+                "user_id": current_user.id,
+                "word_id": word_id,
+                "grade": payload.grade,
+            },
+        )
+
+    return schemas.GradeResponse(
+        exercise_id=payload.exercise_id,
+        exercise_type=payload.exercise_type,
+        next_due_at=new_card.due,
+        card_state=int(new_card.state),
+        stability=float(new_card.stability or 0.0),
+        difficulty=float(new_card.difficulty or 0.0),
+        trace_id=trace_id,
+    )
+
+
+def _trace_grade(
+    *,
+    metadata: dict[str, Any],
+    latency_ms: int,
+    grade: int,
+    exercise_id: int,
+) -> str | None:
+    """Emit one Langfuse ``exercise.grade`` span per grade request.
+
+    Mirrors ``_trace_retrieval`` and ``_trace_cloze``'s shape: a
+    v2 SDK ``client.span(...)`` + ``span.update(metadata=...)`` +
+    ``span.end()`` + ``client.flush()`` sequence. The
+    ``start_as_current_span`` context-manager API referenced in
+    the card body is a v3-only method — we follow the v2 pattern
+    that 4.3 (cloze) and Phase 1 (retrieval) both use.
+
+    **SDK version note.** The v2 SDK exposes the span id via
+    ``span.id`` on the handle returned by ``client.span(...)``.
+    The card body sketch returned ``span.id``; we keep that
+    choice. If a future SDK upgrade changes the attribute name,
+    this function is the single edit point.
+
+    **Graceful degradation.** When ``LANGFUSE_PUBLIC_KEY`` /
+    ``LANGFUSE_SECRET_KEY`` are missing, ``get_langfuse()`` returns
+    ``None``. We early-return ``None`` and the grade_logs row is
+    inserted with ``trace_id=None`` — observability is best-effort,
+    never blocking.
+
+    **Failure mode.** Any exception raised by the Langfuse SDK is
+    caught and logged at WARNING — the grade has already succeeded
+    at this point, so a trace failure must never break the request.
+
+    Returns:
+        ``str``: the Langfuse span id (the ``grade_logs.trace_id``
+            value when Langfuse keys are set).
+        ``None``: when Langfuse keys are unset, or when the SDK
+            raises an exception (we log the error and continue).
+    """
+    client = get_langfuse()
+    if client is None:
+        # Keys missing — already warned at startup. Don't spam per call.
+        return None
+
+    span = None
+    try:
+        span = client.span(name="exercise.grade")
+        span.update(
+            # The ``input`` is the minimum discriminator pair (grade +
+            # exercise_id); the full metadata contract lives in
+            # ``metadata`` so a Langfuse UI filter on any field
+            # surfaces the matching spans.
+            input={"grade": grade, "exercise_id": exercise_id},
+            metadata=metadata,
+        )
+        # Fill the ``trace_id`` key in the metadata dict IN PLACE so
+        # the caller can read it back. We do this before ``end()``
+        # so the span record carries its own id in its metadata.
+        span_id = getattr(span, "id", None) or getattr(
+            span, "span_id", None
+        )
+        metadata["trace_id"] = span_id
+        span.end()
+        # Force a flush so the trace is queryable in the UI before
+        # the request returns — mirrors _trace_retrieval / _trace_cloze.
+        client.flush()
+        return span_id
+    except Exception as exc:  # noqa: BLE001 — tracing must never break the activity
+        logger.warning(
+            "grade: Langfuse trace failed (non-fatal): %s", exc
+        )
+        if span is not None:
+            try:
+                span.end()
+            except Exception:
+                pass
+        return None
 
 
 # ---------------------------------------------------------------------------
