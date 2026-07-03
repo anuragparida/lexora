@@ -140,6 +140,54 @@ deviation from the original LLM-generated eval-set spec
 (template-based fallback, since all 28 OpenRouter chat models
 are blocked by the account's data-policy guardrail).
 
+## Cloze generation (Phase 4.2)
+
+`POST /exercises/cloze` returns one fill-in-the-blank exercise
+tailored to the learner's weakness profile. The route is
+auth-gated (cookie session, same as every other authed endpoint).
+
+**What it does.** Picks a target word deterministically from the
+learner's highest-scoring weakness axis (e.g. `verbs: 3`), builds
+a constrained prompt that includes the word's first example
+sentence from the corpus (no retrieval call — Hard rule #3), and
+sends it to OpenRouter through `instructor` so the response is
+validated against a Pydantic `ClozeExercise` model with bounded
+retries (≤ 3). The response carries the answer word id, three
+distractor word ids of the same word type, the difficulty label,
+and a one-sentence rationale. Frontend (`/exercises/cloze`,
+Phase 4.5) renders the sentence with a blank + four randomised
+choices.
+
+**Curl:**
+
+```bash
+curl -s -X POST http://localhost:18700/exercises/cloze \
+  -H "Cookie: lexora_session=$LEXORA_SESSION" \
+  -b cookies.txt -c cookies.txt | jq .
+```
+
+Returns `200` + `ClozeExercise` JSON, or `502` if the schema
+retries are exhausted (the body carries
+`schema_retry_count` + `last_validation_error` for triage).
+
+**Run the offline DSPy optimizer** (MIPROv2 / BootstrapFewShot
+against the held-out eval set):
+
+```bash
+cd backend
+# Offline — uses DSPy's DummyLM; safe to run on a CI box with
+# no OpenRouter credentials.
+uv run python -m scripts.optimize_cloze
+
+# Live — fires the real OpenRouter adapter; only effective when
+# OPENROUTER_API_KEY is set, AND you pass --live explicitly.
+OPENROUTER_API_KEY="$YOUR_OPENROUTER_KEY" uv run python -m scripts.optimize_cloze --live
+```
+
+The CLI writes the optimised prompt instructions to
+`backend/app/cloze_optimized.json` (gitignored). The path is
+the production wiring point for Phase 5+.
+
 ## Development
 
 ### Backend (against the bundled Postgres)
@@ -182,6 +230,7 @@ pnpm dev
 | POST | `/decks/generate` | Build an `.apkg` deck from filtered words |
 | GET | `/decks/list` | List previously generated decks |
 | GET | `/retrieve?query=&k=&source=` | Top-K nearest neighbours by cosine distance (Phase 1, Postgres + pgvector only) |
+| POST | `/exercises/cloze` | Generate one cloze exercise for the logged-in learner (Phase 4.2; auth-gated) |
 
 ## Generating Anki decks
 
@@ -207,7 +256,9 @@ lexora/
 │   │   ├── database.py      Engine + session
 │   │   ├── bootstrap.py     One-time corpus seeder (SQLite → Postgres)
 │   │   ├── observability.py Langfuse client wrapper
-│   │   └── anki_builder.py  genanki deck builder with dark CSS
+│   │   ├── anki_builder.py  genanki deck builder with dark CSS
+│   │   ├── llm.py           OpenRouter chat-completions client (Phase 4.1)
+│   │   ├── cloze.py         Cloze exercise generator + DSPy module (Phase 4.2)
 │   ├── alembic/             Migrations (baseline = words/examples/verb/fsrs)
 │   ├── data/
 │   │   └── vocabeo_words.db Pre-built SQLite corpus (dev fallback)

@@ -371,3 +371,45 @@ class MeOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.2 — Cloze exercise response (card t_bdd9ffbe)
+#
+# Mirrors ``app.cloze.ClozeExercise`` 1:1. The split is intentional:
+# ``app.cloze`` owns the *generator* contract (used by the
+# instructor-wrapped chat call); ``app.schemas`` owns the *wire*
+# contract (used by the FastAPI response_model and the SPA).
+# Field-for-field equivalence today; if they ever diverge, the
+# schemas shape is the one Phase 5's grading loop will read off the
+# persisted row.
+# ---------------------------------------------------------------------------
+
+
+ClozeDifficulty = Literal["easy", "medium", "hard"]
+
+
+class ClozeExerciseOut(BaseModel):
+    """Response shape for ``POST /exercises/cloze``."""
+
+    sentence_with_blank: str = Field(
+        ...,
+        description=(
+            "German sentence with '___' marking the cloze position."
+        ),
+    )
+    answer_word_id: int = Field(..., description="FK to words.id of the correct answer.")
+    distractors: list[int] = Field(
+        ...,
+        min_length=3,
+        max_length=3,
+        description=(
+            "Exactly 3 FKs to words.id of plausible wrong answers. "
+            "Same word_type as answer_word_id."
+        ),
+    )
+    difficulty: ClozeDifficulty
+    rationale: str = Field(..., min_length=1, max_length=400)
+    prompt_template_version: str = Field(
+        ..., description="Should always equal 'cloze-v1' for production generations."
+    )

@@ -47,3 +47,8 @@ backend/data/*.db.local
 # Generated Anki decks are produced at runtime by the API. Keep them
 # out of git history.
 backend/generated_decks/
+
+# Phase 4.2 — DSPy optimizer output (card t_bdd9ffbe). Re-written
+# every time ``uv run python -m scripts.optimize_cloze`` runs; not
+# a source-of-truth artifact, so it stays out of git history.
+backend/app/cloze_optimized.json

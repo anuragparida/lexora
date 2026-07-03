@@ -17,6 +17,17 @@ dependencies = [
     "pgvector>=0.3.6",
     "pytest>=8.3.0",
     "respx>=0.21.0",
+    # Phase 4.2 — cloze exercise generator (card t_bdd9ffbe).
+    # ``instructor`` wraps ``openai.OpenAI`` (used against OpenRouter,
+    # which speaks the OpenAI-compatible wire format) to enforce
+    # Pydantic-validated structured output with bounded retries
+    # (Hard rule #6). ``dspy`` powers the optimization path
+    # (Phase 4.4's MIPROv2 / BootstrapFewShot against the held-out
+    # eval set) and is imported only by ``scripts/optimize_cloze.py``
+    # and the ``ClozeModule`` class — the production path goes
+    # through instructor, not dspy.
+    "instructor>=1.3.0",
+    "dspy>=2.5.0",
     # Phase 2.2 — auth (card t_74c3aa1e). bcrypt password hashing
     # (direct — passlib 1.7.4 is incompatible with bcrypt 5.x on its
     # wrap-bug detection probe; we just use the bcrypt module's

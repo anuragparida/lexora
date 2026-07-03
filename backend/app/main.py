@@ -6,7 +6,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from typing import List, Optional, Literal
+from typing import Any, List, Optional, Literal
 from app import auth, crud, models, schemas, anki_builder, bootstrap, retrieval
 from app.database import get_db, engine
 from app.diagnostic.routes import router as diagnostic_router
@@ -549,6 +549,93 @@ def write_weakness_profile(
         "axes": crud.serialize_weakness_profile_axes(profile),
         "updated_at": profile.updated_at,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.2 — Cloze exercise route (card t_bdd9ffbe)
+#
+# Single auth-gated endpoint, ``POST /exercises/cloze``. Body: ``{}``
+# (word selection is server-driven from the user's weakness profile).
+# Response: the ``ClozeExercise`` Pydantic model.
+#
+# No grading endpoint — Phase 5 wires ``py-fsrs`` + the matching
+# exercise type + a ``POST /exercises/grade`` route on top of this.
+#
+# Errors:
+# - 401: missing / invalid JWT (raised by ``get_current_user``).
+# - 502: LLM transport / provider error or persistent schema
+#   violation (``ClozeGenerationError``). The body carries the
+#   structured fields so an operator can triage without re-running.
+# - 500: corpus inconsistency (e.g. ``select_target_word`` raised
+#   ``ValueError`` because the mapped ``word_type`` has zero rows).
+# ---------------------------------------------------------------------------
+
+
+@app.post("/exercises/cloze", response_model=schemas.ClozeExerciseOut)
+def generate_cloze_exercise(
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Generate one cloze exercise for the logged-in learner.
+
+    The route is intentionally thin — all logic lives in
+    ``app.cloze.generate_cloze``. We import lazily inside the
+    handler so the module-level ``main.py`` stays import-cheap and
+    so the existing test suite (which imports ``app.main`` before
+    the cloze module) doesn't pay the OpenAI / instructor import
+    cost.
+
+    The body is an empty ``BaseModel`` — we don't accept any input.
+    The frontend re-fetches on every ``Generate another`` click, so
+    a fixed-shape request keeps the surface stable.
+    """
+    from app.cloze import (
+        ClozeGenerationError,
+        generate_cloze,
+        PROMPT_TEMPLATE_VERSION,
+    )
+    from app.llm import LLMError
+
+    try:
+        exercise = generate_cloze(db, current_user.id)
+    except LLMError as exc:
+        logger.error(
+            "cloze: LLM transport failure for user_id=%d: %s",
+            current_user.id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"cloze generation failed: {exc}",
+        )
+    except ClozeGenerationError as exc:
+        logger.error(
+            "cloze: schema dead-letter for user_id=%d after %d attempt(s): %s",
+            current_user.id,
+            exc.schema_retry_count,
+            exc.last_validation_error,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "cloze_generation_failed",
+                "schema_retry_count": exc.schema_retry_count,
+                "last_validation_error": exc.last_validation_error,
+            },
+        )
+    except ValueError as exc:
+        # Corpus inconsistency (e.g. axis-mapped word_type has zero
+        # rows). 500 — operator needs to look at the seed data.
+        logger.error("cloze: corpus inconsistency for user_id=%d: %s",
+                     current_user.id, exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Lock the prompt_template_version on the way out so a future
+    # ``generate_cloze`` that forgets to set it can't desync the
+    # contract.
+    return exercise.model_copy(
+        update={"prompt_template_version": PROMPT_TEMPLATE_VERSION}
+    )
 
 
 # ---------------------------------------------------------------------------
