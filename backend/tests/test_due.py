@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import secrets
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import httpx
 import pytest
@@ -642,7 +643,7 @@ def test_force_word_id_only_at_due_route_not_cloze_route(
         ["grep", "-rn", "force_word_id", "app/", "../app/"],
         capture_output=True,
         text=True,
-        cwd="/tmp/perseus-5-4-due/backend",
+        cwd=Path(__file__).resolve().parent.parent,
     )
     matches = [
         line
