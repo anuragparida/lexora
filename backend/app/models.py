@@ -88,14 +88,27 @@ class FsrsCard(Base):
 
     Added in Phase 0 baseline because the shipped SQLite corpus already
     includes this table (created empty by the loader for forward
-    compatibility with Phase 6's py-fsrs wiring). Phase 6 will evolve
-    it; for now the schema is fixed.
+    compatibility with Phase 6's py-fsrs wiring). Phase 5.2 (card
+    t_88b6f1c4) adds the ``word_id`` UNIQUE constraint — one card
+    per word, so the Phase 5.3 grader can do a clean
+    ``WHERE word_id = ?`` lookup. The constraint is enforced at the
+    DB level via the ``ix_fsrs_cards_word_id_unique`` index created
+    by the matching Alembic migration (portable across SQLite +
+    Postgres). The column here carries the matching ``unique=True``
+    flag so SQLAlchemy metadata and the DB agree; the canonical
+    constraint is the index, not the SA-level flag (CREATE UNIQUE
+    INDEX is portable; ALTER TABLE ADD CONSTRAINT UNIQUE is not).
     """
 
     __tablename__ = "fsrs_cards"
 
     id = Column(Integer, primary_key=True, index=True)
-    word_id = Column(Integer)
+    # Phase 5.2: unique=True mirrors the DB-level unique index. The
+    # column itself is nullable on the old schema because Phase 0
+    # shipped it that way (a card row pre-existed the word in some
+    # backfill scenarios); the constraint still fires on non-null
+    # duplicates.
+    word_id = Column(Integer, unique=True)
     difficulty = Column(Float)
     stability = Column(Float)
     retrievability = Column(Float)
@@ -106,6 +119,56 @@ class FsrsCard(Base):
     state = Column(Integer)
     elapsed_days = Column(Integer)
     scheduled_days = Column(Integer)
+
+
+class GradeLog(Base):
+    """Phase 5.2 (card t_88b6f1c4) — per-grade audit trail.
+
+    Every call to ``POST /exercises/grade`` (5.3) writes one row
+    here, capturing the full grading snapshot at the moment the
+    grade landed. The row's ``trace_id`` (NULL when Langfuse keys
+    are unset) is the join key Phase 6's Ragas evaluator will use
+    to replay an offline eval back against the Langfuse trace.
+
+    Append-only by design (no UPDATEs, no DELETEs). Phase 6 may add
+    a Postgres trigger to enforce the append-only invariant at the
+    DB level; Phase 5 relies on application-layer discipline.
+
+    Column set mirrors the Phase 5 metadata contract (``PHASE-5.md``
+    §"The metadata contract"). ``exercise_type`` is a plain
+    ``String`` (not an Enum) because Phase 5 hard-locks the value
+    at the Pydantic wire layer (``Literal["cloze"]``); the DB
+    column stays loose so a future exercise kind can be added
+    without a schema rewrite.
+    """
+
+    __tablename__ = "grade_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True
+    )
+    exercise_id = Column(Integer, nullable=False)
+    exercise_type = Column(String, nullable=False)  # "cloze" only in Phase 5
+    word_id = Column(Integer, nullable=False)
+    grade = Column(Integer, nullable=False)  # 1-4
+    scheduled_next_due_at = Column(DateTime, nullable=False)
+    prev_due_at = Column(DateTime, nullable=False)
+    state = Column(Integer, nullable=False)
+    stability = Column(Float, nullable=False)
+    difficulty = Column(Float, nullable=False)
+    reps = Column(Integer, nullable=False)
+    lapses = Column(Integer, nullable=False)
+    # NULL when Langfuse keys are unset (tests, dev). The Phase 6
+    # Ragas join tolerates NULL rows and skips them.
+    trace_id = Column(String, nullable=True)
+    latency_ms = Column(Integer, nullable=False)
+    # ``default=datetime.utcnow`` fires on the Python-side INSERT
+    # path; the matching Alembic migration sets ``server_default``
+    # for raw-SQL inserts so the column is never NULL.
+    graded_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
 
 
 def _is_pg() -> bool:

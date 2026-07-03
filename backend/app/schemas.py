@@ -413,3 +413,68 @@ class ClozeExerciseOut(BaseModel):
     prompt_template_version: str = Field(
         ..., description="Should always equal 'cloze-v1' for production generations."
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.2 — Grade request / response (card t_88b6f1c4)
+#
+# Wire contract for ``POST /exercises/grade``. Phase 5.3 imports this
+# shape — keeping schemas + models here means 5.3 and 5.4 read the
+# same Pydantic types and the same SQLAlchemy rows.
+#
+# Hard rule #2 (type-level guardrail): ``exercise_type`` is
+# ``Literal["cloze"]`` on BOTH request and response. Any deviation
+# (e.g. "matching", "comprehension") is a Pydantic
+# ValidationError, not a runtime check downstream — the type
+# system is the gate.
+#
+# Hard rule #5 (Pydantic v2 validated input): ``grade`` is
+# ``Literal[1, 2, 3, 4]`` — out-of-range grades (0, 5, -1) reject
+# at the schema layer. ``exercise_id`` carries ``gt=0`` so a 0
+# (or negative) id is rejected before it reaches the grader.
+# ---------------------------------------------------------------------------
+
+
+class GradeRequest(BaseModel):
+    """Request body for ``POST /exercises/grade``.
+
+    The grader (5.3) uses ``exercise_id`` to look up the FSRS card
+    that backs this exercise — for the cloze kind, the cloze
+    generator (4.2) embeds ``answer_word_id`` in the
+    ``ClozeExercise`` payload, so 5.3 derives the ``word_id``
+    from the card row, not the request. The request body
+    carries the ``grade`` score (1=Again, 2=Hard, 3=Good, 4=Easy)
+    only; the rest of the snapshot is reconstructed from the card
+    row + the Langfuse span.
+    """
+
+    exercise_id: int = Field(..., gt=0)
+    exercise_type: Literal["cloze"]
+    grade: Literal[1, 2, 3, 4]
+
+
+class GradeResponse(BaseModel):
+    """Response body for ``POST /exercises/grade``.
+
+    Returns the post-grade snapshot: when the next review is due,
+    the FSRS card state (1=Learning / 2=Review / 3=Relearning),
+    and the two scalar params the Langfuse ``exercise.grade``
+    span will surface (``stability``, ``difficulty``). The
+    ``trace_id`` is the Langfuse span id when keys are set,
+    ``None`` otherwise (graceful-degradation path).
+
+    The leading ``graded: Literal[True] = True`` discriminator is
+    forward-leaning: when 5.3 / 5.4 evolve to return a richer
+    payload (e.g. a 202 for "queued"), a new response model can
+    introduce ``graded: Literal[False]`` and a tagged-union on
+    the wire. Phase 5 only ships the True branch.
+    """
+
+    graded: Literal[True] = True
+    exercise_id: int
+    exercise_type: Literal["cloze"]
+    next_due_at: datetime
+    card_state: int  # 1/2/3
+    stability: float
+    difficulty: float
+    trace_id: str | None
