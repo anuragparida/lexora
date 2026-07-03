@@ -123,6 +123,23 @@ context length. Phase 4 (exercise generator) and Phase 6 (RAG-on)
 will both consume `/retrieve`; shipping the pipe now keeps the
 later phases small.
 
+## Eval set + offline runner (Phase 4.4)
+
+`eval/cloze_judgments.jsonl` is the held-out eval set for the
+cloze-exercise generator. 80 rows across all 7 clozable word
+types (Noun / Verb / Adjective / Adverb / Pronoun / Preposition /
+Conjunction), with `context_sentence`, distractors, difficulty
+label, and provenance. The runner (`backend/scripts/eval_cloze.py`)
+computes `accept_rate`, `schema_validity_rate`, and
+`rationale_quality_proxy`. `--dry-run` exits 0 and prints OK
+without contacting OpenRouter — the CI smoke path.
+
+See [`docs/EVAL.md`](docs/EVAL.md) for the full reference:
+re-generation, runner usage, metric definitions, and the locked
+deviation from the original LLM-generated eval-set spec
+(template-based fallback, since all 28 OpenRouter chat models
+are blocked by the account's data-policy guardrail).
+
 ## Development
 
 ### Backend (against the bundled Postgres)
