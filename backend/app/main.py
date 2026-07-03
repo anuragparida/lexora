@@ -575,6 +575,7 @@ def write_weakness_profile(
 
 @app.post("/exercises/cloze", response_model=schemas.ClozeExerciseOut)
 def generate_cloze_exercise(
+    payload: schemas.ClozeGenerateRequest = schemas.ClozeGenerateRequest(),
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
@@ -587,9 +588,38 @@ def generate_cloze_exercise(
     the cloze module) doesn't pay the OpenAI / instructor import
     cost.
 
-    The body is an empty ``BaseModel`` — we don't accept any input.
-    The frontend re-fetches on every ``Generate another`` click, so
-    a fixed-shape request keeps the surface stable.
+    **Phase 6.1** — the request body is a
+    ``ClozeGenerateRequest`` with the single field
+    ``enable_rag: bool = False``. An empty body ``{}`` parses to
+    the default (``enable_rag=False``), preserving the Phase 4.5
+    wire contract verbatim — existing callers see no change. When
+    ``enable_rag=True``, the cloze generator's user prompt
+    includes ``retrieved_chunks`` (Postgres + pgvector only; on
+    SQLite the call gracefully degrades to the non-RAG prompt —
+    see ``app.cloze._retrieve_for_cloze`` for the fallback path).
+
+    **Response** — the route maps the
+    ``app.cloze.ClozeExercise`` (generator contract) to the
+    ``schemas.ClozeExerciseOut`` (wire contract) by stamping the
+    Phase 6.1 shared metadata fields:
+
+    - ``exercise_type="cloze"`` (the discriminator)
+    - ``target_word_id`` ← ``answer_word_id`` (the cloze-specific
+      field; the two are semantically the same on cloze)
+    - ``enable_rag`` ← from the request payload
+    - ``latency_ms`` ← wall-clock end-to-end
+    - ``trace_id`` ← Langfuse span id (Phase 4.3 hook returns
+      ``None`` for now; graceful-degradation path)
+
+    Errors:
+    - 401: missing / invalid JWT (raised by ``get_current_user``).
+    - 422: invalid request body (Pydantic — non-bool
+      ``enable_rag`` etc.). FastAPI's default 422 envelope.
+    - 502: LLM transport / provider error or persistent schema
+      violation (``ClozeGenerationError``). The body carries the
+      structured fields so an operator can triage without re-running.
+    - 500: corpus inconsistency (e.g. ``select_target_word`` raised
+      ``ValueError`` because the mapped ``word_type`` has zero rows).
     """
     from app.cloze import (
         ClozeGenerationError,
@@ -598,8 +628,11 @@ def generate_cloze_exercise(
     )
     from app.llm import LLMError
 
+    started = time.perf_counter()
     try:
-        exercise = generate_cloze(db, current_user.id)
+        exercise = generate_cloze(
+            db, current_user.id, enable_rag=payload.enable_rag
+        )
     except LLMError as exc:
         logger.error(
             "cloze: LLM transport failure for user_id=%d: %s",
@@ -632,11 +665,27 @@ def generate_cloze_exercise(
                      current_user.id, exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
+    latency_ms = int((time.perf_counter() - started) * 1000)
+
     # Lock the prompt_template_version on the way out so a future
     # ``generate_cloze`` that forgets to set it can't desync the
-    # contract.
-    return exercise.model_copy(
-        update={"prompt_template_version": PROMPT_TEMPLATE_VERSION}
+    # contract. Map the generator's ``ClozeExercise`` to the
+    # wire-level ``ClozeExerciseOut`` with the Phase 6.1 shared
+    # fields stamped.
+    return schemas.ClozeExerciseOut(
+        # Generator fields
+        sentence_with_blank=exercise.sentence_with_blank,
+        answer_word_id=exercise.answer_word_id,
+        distractors=exercise.distractors,
+        difficulty=exercise.difficulty,
+        rationale=exercise.rationale,
+        # Shared metadata (Phase 6.1)
+        exercise_type="cloze",
+        target_word_id=exercise.answer_word_id,
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
+        enable_rag=payload.enable_rag,
+        trace_id=None,  # Phase 4.3 hook returns None; 6.x widens to a real id
+        latency_ms=latency_ms,
     )
 
 
@@ -702,6 +751,9 @@ def get_due_exercise(
     )
     from app.llm import LLMError
 
+    # Phase 6.1 — start the wall-clock for ``latency_ms`` on the
+    # response. The route wraps the FSRS pick + the LLM call.
+    _due_started = time.perf_counter()
     now = datetime.utcnow()
 
     # Branch 1: FSRS-driven. Pick the earliest-due fsrs_cards row.
@@ -838,14 +890,23 @@ def get_due_exercise(
         raise HTTPException(status_code=500, detail=str(exc))
 
     # Lock the prompt_template_version (same as POST /exercises/cloze)
-    # and attach the due_from_fsrs discriminator. FastAPI's
+    # and attach the due_from_fsrs discriminator plus the Phase 6.1
+    # shared metadata fields. FastAPI's
     # ``response_model=schemas.ClozeDueExerciseOut`` validates the
     # returned dict against the merged Pydantic schema.
-    exercise = exercise.model_copy(
-        update={"prompt_template_version": PROMPT_TEMPLATE_VERSION}
-    )
+    #
+    # Note: the due-queue surface (5.4) is non-RAG by default — it
+    # doesn't pass ``enable_rag=True`` to ``generate_cloze`` (the
+    # due-queue picks the word for the user, not the user picking
+    # "I want RAG on"). The new RAG flag stays default-False.
+    latency_ms_due = int((time.perf_counter() - _due_started) * 1000)
     return {
         **exercise.model_dump(),
+        "exercise_type": "cloze",
+        "target_word_id": exercise.answer_word_id,
+        "enable_rag": False,
+        "trace_id": None,
+        "latency_ms": latency_ms_due,
         "due_from_fsrs": due_from_fsrs,
     }
 

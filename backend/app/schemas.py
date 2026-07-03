@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Literal
 
 
@@ -389,8 +389,123 @@ class MeOut(BaseModel):
 ClozeDifficulty = Literal["easy", "medium", "hard"]
 
 
-class ClozeExerciseOut(BaseModel):
-    """Response shape for ``POST /exercises/cloze``."""
+# Phase 6.1 (card t_616cc266) — shared exercise metadata fields
+# surfaced on every exercise response. Defined here as a Pydantic
+# mixin so the cloze / matching / comprehension response models can
+# all inherit it without a deep class hierarchy. The Phase 6.2+
+# cards extend this union (``exercise_type: Literal["cloze",
+# "matching", "comprehension"]``) and the per-exercise models add
+# only their type-specific fields.
+#
+# Field roster (locked by ``docs/PHASE-6.md`` §"The exercise-type
+# wire"):
+#
+# - ``exercise_type``: wire discriminator (Phase 6 widens from
+#   ``Literal["cloze"]`` to the 3-way union; Phase 6.1 ships the
+#   cloze-only branch because matching + comprehension aren't
+#   built yet).
+# - ``target_word_id``: FK to ``words.id`` of the answer.
+# - ``prompt_template_version``: A/B eval key. Always equals the
+#   module constant for production generations.
+# - ``enable_rag``: echoed from the request. ``False`` for cloze
+#   when the caller didn't pass ``enable_rag=True``; ``False`` for
+#   matching / comprehension (Phase 6.1 only ships the cloze
+#   opt-in; the other types default to ``False`` until their own
+#   cards extend the contract).
+# - ``trace_id``: Langfuse span id, ``None`` when keys are unset
+#   (graceful degradation).
+# - ``latency_ms``: end-to-end wall-clock from the activity
+#   boundary.
+class BaseExerciseFields(BaseModel):
+    """Shared metadata on every exercise response.
+
+    Pydantic v2 mixin pattern: a ``BaseModel`` with no required
+    fields acts as a field-bag that other models can subclass.
+    Subclasses call ``class ClozeExerciseOut(BaseExerciseFields):
+    ...`` and inherit every field listed here.
+    """
+
+    exercise_type: Literal["cloze", "matching", "comprehension"] = Field(
+        default="cloze",
+        description=(
+            "Wire discriminator. Phase 6.1 ships the cloze-only "
+            "branch; matching + comprehension widen this literal in "
+            "6.2 / 6.4."
+        ),
+    )
+    target_word_id: int = Field(
+        ...,
+        description=(
+            "FK to words.id of the answer / central token for this "
+            "exercise."
+        ),
+    )
+    prompt_template_version: str = Field(
+        ...,
+        description=(
+            "Should always equal the module constant for production "
+            "generations. Used as an A/B key by Ragas (Phase 6.7)."
+        ),
+    )
+    enable_rag: bool = Field(
+        default=False,
+        description=(
+            "Echoed from the request. Phase 6.1 — only the cloze "
+            "endpoint honours ``enable_rag=True``; matching + "
+            "comprehension are non-RAG in this card."
+        ),
+    )
+    trace_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Langfuse span id for the generation. ``None`` when "
+            "LANGFUSE_*_KEY env vars are unset (graceful "
+            "degradation — the activity still succeeds)."
+        ),
+    )
+    latency_ms: int = Field(
+        ...,
+        description=(
+            "End-to-end wall-clock from the activity boundary to "
+            "the response. Includes the LLM round-trip; recorded "
+            "for offline A/B comparison."
+        ),
+    )
+
+
+class ClozeExerciseOut(BaseExerciseFields):
+    """Response shape for ``POST /exercises/cloze``.
+
+    Inherits the shared ``BaseExerciseFields`` (Phase 6.1) and adds
+    the cloze-specific fields from Phase 4.2. ``target_word_id`` is
+    a duplicate of ``answer_word_id`` on purpose: the shared field
+    is the canonical wire name for cross-exercise-type consumers
+    (Phase 9's study-session mixer), while ``answer_word_id`` is
+    kept for Phase 5.x backward compatibility with the cloze-only
+    clients built against the Phase 4.2 wire shape.
+
+    **Discriminator lock.** ``exercise_type`` is narrowed here
+    from the base class's 3-way ``Literal["cloze", "matching",
+    "comprehension"]`` down to the cloze-only branch
+    (``Literal["cloze"]``). Trying to set
+    ``exercise_type="matching"`` on a ``ClozeExerciseOut`` is a
+    ``ValidationError`` — the type system is the gate (Phase 6
+    plan §"Hard rules" #1). The matching / comprehension cards
+    (6.2 / 6.4) introduce their own subclasses that narrow the
+    discriminator to their own branch.
+    """
+
+    # Re-declare ``exercise_type`` here so it narrows the
+    # ``Literal`` to ``"cloze"`` only. Pydantic v2 honours the
+    # narrowed annotation on the subclass; the base class's
+    # broader union doesn't bleed through.
+    exercise_type: Literal["cloze"] = Field(
+        default="cloze",
+        description=(
+            "Wire discriminator. Always ``\"cloze\"`` on this "
+            "response — matching / comprehension are 6.2 / 6.4."
+        ),
+    )
 
     sentence_with_blank: str = Field(
         ...,
@@ -410,8 +525,53 @@ class ClozeExerciseOut(BaseModel):
     )
     difficulty: ClozeDifficulty
     rationale: str = Field(..., min_length=1, max_length=400)
-    prompt_template_version: str = Field(
-        ..., description="Should always equal 'cloze-v1' for production generations."
+
+    @model_validator(mode="after")
+    def _target_matches_answer(self) -> "ClozeExerciseOut":
+        """Cross-field check: ``target_word_id`` must equal
+        ``answer_word_id`` for cloze. The shared field exists for
+        cross-exercise-type consumers; on cloze the two are
+        semantically the same — a drift would be a bug.
+
+        Uses ``model_validator(mode="after")`` (Pydantic v2)
+        because the check needs both fields populated; the
+        ``field_validator`` machinery runs per-field and doesn't
+        have a reliable view of sibling fields without a
+        ``model_validator`` wrapper.
+        """
+        if self.target_word_id != self.answer_word_id:
+            raise ValueError(
+                f"target_word_id={self.target_word_id} must equal "
+                f"answer_word_id={self.answer_word_id} for cloze exercises"
+            )
+        return self
+
+
+# Phase 6.1 (card t_616cc266) — request body for
+# ``POST /exercises/cloze``. The Phase 4.5 endpoint accepted an
+# empty body; this card adds the optional ``enable_rag`` field.
+# Default ``False`` means existing callers (curl, the Phase 4.5/5.5
+# frontend) keep working without any change.
+class ClozeGenerateRequest(BaseModel):
+    """Request body for ``POST /exercises/cloze``.
+
+    Phase 6.1 — the only field is ``enable_rag`` (default
+    ``False``). An empty body ``{}`` parses to
+    ``ClozeGenerateRequest(enable_rag=False)`` via Pydantic's
+    defaults, so the Phase 4.5 wire contract is preserved.
+    """
+
+    enable_rag: bool = Field(
+        default=False,
+        description=(
+            "Phase 6.1 — opt-in flag for the retrieval-augmented "
+            "cloze prompt path. When ``True``, the cloze generator "
+            "calls ``/retrieve`` (Postgres + pgvector) and embeds "
+            "the top chunks in the user prompt. When ``False`` "
+            "(default), the prompt is byte-for-byte identical to "
+            "Phase 4.2's — keeps the offline eval reproducible "
+            "for A/B comparison."
+        ),
     )
 
 
