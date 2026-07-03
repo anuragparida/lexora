@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { login, signup, getMe, type AuthUser } from '../auth'
-import { postAuthRoute } from '../routing/postAuthRoute'
+import { postAuthGate } from '../routing/postAuthRoute'
 
-// Phase 2.3 (card t_ffe6d6af) + Phase 3.3 (card t_ff6fa637):
-// combined signup/login form.
+// Phase 2.3 (card t_ffe6d6af) + Phase 3.3 (card t_ff6fa637) +
+// Phase 5.6 (card t_f9375354): combined signup/login form.
 //
 // Phase 2.3 stored the token (already done inside `login` /
 // `signup`) and navigated to `/`. The Header in the new layout
@@ -15,6 +15,9 @@ import { postAuthRoute } from '../routing/postAuthRoute'
 // based on the user's diagnostic state. The full routing table
 // lives in ``postAuthRoute``; this component just calls it.
 //
+// Phase 5.6 layers a third branch on top: the async gate checks
+// /exercises/due BEFORE the profile-state branches and routes
+// users with outstanding cards straight to the study flow.
 // On any error fetching the post-auth payload (network blip, etc.)
 // we fall back to the legacy ``/`` route — the header will
 // re-probe /auth/me on the next mount and the user is still
@@ -49,7 +52,7 @@ export function AuthForm({ mode }: Props) {
       let target = '/'
       try {
         const me = await getMe()
-        target = postAuthRoute(me)
+        target = await postAuthGate(me)
       } catch {
         // /auth/me failed (e.g. transient 5xx). The user is
         // logged in — fall back to / so they at least see the

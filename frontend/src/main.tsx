@@ -12,8 +12,9 @@ import { ClozePage } from './pages/ClozePage'
 import { AuthForm } from './components/AuthForm'
 import { ProtectedRoute } from './components/ProtectedRoute'
 
-// Phase 2.3 (card t_ffe6d6af) + Phase 3.2 (card t_64055c49) + Phase 4.5
-// (card t_4a9f172e): top-level router.
+// Phase 2.3 (card t_ffe6d6af) + Phase 3.2 (card t_64055c49) +
+// Phase 4.5 (card t_4a9f172e) + Phase 5.6 (card t_f9375354):
+// top-level router.
 //
 // Route map:
 //   /                 public   Phase 1 search/filter UI
@@ -23,10 +24,15 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 //   /diagnostic       protected Phase 3.2 multi-step probe
 //   /study            protected placeholder; Phase 5+ fills it in
 //   /exercises/cloze  protected Phase 4.5 minimal cloze surface
+//   /exercises/due    protected Phase 5.6 gate-target; mounts
+//                              ClozePage so users with due cards land
+//                              in the actual study flow. Phase 5.5
+//                              (card t_f253456b) may swap the mount
+//                              point for a dedicated component.
 //
-// /weakness-profile, /diagnostic, /study, and /exercises/cloze are
-// gated. The existing Anki-deck flow on / stays open (per the
-// Phase 2.3 hard rule).
+// /weakness-profile, /diagnostic, /study, /exercises/cloze, and
+// /exercises/due are gated. The existing Anki-deck flow on /
+// stays open (per the Phase 2.3 hard rule).
 //
 // Phase 4.5 also adds the global sonner <Toaster /> so the
 // cloze-page submit toast (and any future 5xx toasts) has a
@@ -77,6 +83,14 @@ createRoot(document.getElementById('root')!).render(
           />
           <Route
             path="/exercises/cloze"
+            element={
+              <ProtectedRoute>
+                {(user) => <ClozePage user={user} />}
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/exercises/due"
             element={
               <ProtectedRoute>
                 {(user) => <ClozePage user={user} />}
