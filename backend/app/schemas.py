@@ -478,3 +478,50 @@ class GradeResponse(BaseModel):
     stability: float
     difficulty: float
     trace_id: str | None
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.4 — ``/exercises/due`` response (card t_e8548d6d)
+#
+# Same cloze payload as ``POST /exercises/cloze`` (Phase 4.2), plus one
+# boolean so the frontend can distinguish the two return modes:
+#
+# - ``due_from_fsrs=True``  — the picked word had a row in ``fsrs_cards``
+#   with ``due_date <= now()``. The user has graded this word before and
+#   the FSRS scheduler says it's time for another review. The frontend
+#   should treat this as "you've seen this word before" and surface the
+#   usual grade buttons (the Phase 5.5 grading surface — not 5.4's
+#   concern).
+# - ``due_from_fsrs=False`` — no card was due; the route picked a fresh
+#   word from the corpus (one with no ``fsrs_cards`` row yet) and
+#   created a fresh Learning row inline. The user is seeing this word
+#   for the first time. The frontend can still grade it (the next
+#   ``POST /exercises/grade`` will see the row); the flag is just a
+#   hint that "this is new" so the UI can choose a different empty-state
+#   message or starter animation.
+#
+# The boolean is locked here on the wire so a Phase 6 / Phase 7
+# frontend can branch on it without re-deriving the heuristic from the
+# underlying row count.
+# ---------------------------------------------------------------------------
+
+
+class ClozeDueExerciseOut(ClozeExerciseOut):
+    """Response shape for ``GET /exercises/due``.
+
+    Inherits every field from ``ClozeExerciseOut`` and adds the
+    ``due_from_fsrs`` discriminator. Pydantic v2 subclassing with
+    extra fields is the canonical extension pattern; FastAPI's
+    ``response_model=...`` accepts the subclass and serialises the
+    merged field set.
+    """
+
+    due_from_fsrs: bool = Field(
+        ...,
+        description=(
+            "True if the picked word had an existing fsrs_cards row "
+            "that was due (FSRS-driven re-grade). False if the route "
+            "picked a fresh corpus word with no fsrs_cards row yet "
+            "and created a new Learning row inline (first encounter)."
+        ),
+    )
