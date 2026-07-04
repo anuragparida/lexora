@@ -465,3 +465,91 @@ class PrepositionalObject(Base):
         default=datetime.utcnow,
         server_default=sa.func.now(),
     )
+
+
+class Phrase(Base):
+    """Phase 8.1 (card t_d967c006) — curated German idiom rows.
+
+    A *phrase* (German: *Phrase / Redewendung*) is a multi-word
+    fixed expression that isn't compositional —
+    ``Tomaten auf den Augen`` (blind to the obvious),
+    ``ins Blaue hinein`` (without a plan). Phase 8.4's
+    ``POST /exercises/idiom`` endpoint consumes these rows;
+    nothing writes back at runtime. The seed scripts (8.1 for
+    DWDS, 8.2 for Goethe / Schiller) are the only paths that
+    insert into this table. Same read-only contract as
+    ``Collocations`` and ``PrepositionalObjects`` (Hard rule
+    #2 of PHASE-8.md).
+
+    Columns mirror the Phase 8.1 card body spec verbatim:
+
+    - ``id`` — slug PK (e.g. ``ins-blaue-hinein``), NOT an
+      autoincrement integer. Slugified from the lemma so the
+      PK is deterministic + human-readable.
+    - ``word_id`` — FK to ``words.id``, the anchor word the
+      idiom is attached to. ``ondelete=SET NULL`` so a future
+      word deletion doesn't cascade-wipe the curated row.
+    - ``phrase`` — the German idiom TEXT (5..200 chars on the
+      Pydantic side, UNIQUE on the DB side so the seed
+      script's ``INSERT OR IGNORE`` is well-defined).
+    - ``definition`` — the learner-friendly gloss TEXT
+      (1..400 chars).
+    - ``example_usage`` — a worked German example TEXT
+      (5..400 chars, nullable for rows that don't carry an
+      example).
+    - ``source_attribution`` — comma-joined subset of
+      ``{dwds, goethe, schiller}``. The literal is enforced
+      on the Pydantic side
+      (``app.schemas.IdiomExerciseOut._validate_source_attribution``)
+      — this column is just the storage, not the gate.
+    - ``frequency_band`` — manual bucketing ``Literal["high",
+      "mid", "low"]``. Drives the Phase 9 high-band-first
+      cloze variant. Indexed for Phase 9 attribution queries.
+    - ``dwds_url`` — the DWDS source URL (nullable for rows
+      that come from Goethe / Schiller only — Phase 8.2's
+      extension).
+    - ``attested_quote`` — Goethe / Schiller attestation
+      (nullable; only set by Phase 8.2 seed).
+    - ``attested_source`` — work + chapter citation for
+      ``attested_quote`` (nullable).
+    - ``created_at`` — DB default for raw-SQL safety.
+
+    **Indexes.** ``source_attribution`` (for Phase 9
+    attribution queries) and ``frequency_band`` (for the
+    Phase 9 high-band-first cloze variant).
+
+    Note: this is a deliberately minimal version of the
+    Phase 8.1 model — the canonical migration is the
+    Alembic file shipped by 8.1. When 8.1 lands, this
+    def stays to keep the in-process reference working.
+    """
+
+    __tablename__ = "phrases"
+
+    id = Column(String, primary_key=True, index=True)
+    word_id = Column(
+        Integer,
+        ForeignKey("words.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    phrase = Column(Text, nullable=False, unique=True)
+    definition = Column(Text, nullable=False)
+    example_usage = Column(Text, nullable=True)
+    source_attribution = Column(
+        String, nullable=False, index=True
+    )
+    frequency_band = Column(
+        String,
+        nullable=False,
+        index=True,
+    )
+    dwds_url = Column(Text, nullable=True)
+    attested_quote = Column(Text, nullable=True)
+    attested_source = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=sa.func.now(),
+    )

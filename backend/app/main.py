@@ -1209,6 +1209,216 @@ def generate_comprehension_exercise(
 
 
 # ---------------------------------------------------------------------------
+# Phase 8.4 — ``POST /exercises/idiom`` (card t_7c21c3f0)
+#
+# Wire surface for the idiom generator (Phase 8.3's
+# ``app.idiom.generate_idiom``). The route mirrors the
+# comprehension shape exactly: body validation, generator call,
+# error translation, response stamping. All prompt + RAG +
+# Langfuse logic lives in ``app.idiom``.
+#
+# Wire contract:
+#   - 401: missing / invalid JWT (raised by ``get_current_user``).
+#   - 404: ``word_id`` has no ``phrases`` row (raised by
+#     ``IdiomNotFoundError`` inside ``generate_idiom``). This is
+#     distinct from the comprehension endpoint's 500 — the card
+#     body explicitly demands 404 for this case, not 500.
+#   - 422: Pydantic validation error (FastAPI default for the
+#     ``IdiomGenerateRequest`` body — missing ``word_id``, or a
+#     malformed ``enable_rag`` type). The per-token
+#     ``source_attribution`` validator also surfaces here when
+#     an empty string or a typoed token (``"goeth"``) reaches
+#     the response model.
+#   - 502: LLM transport failure (``LLMError``) or persistent
+#     schema violation (``IdiomGenerationError``). The body
+#     carries the structured fields so an operator can triage
+#     without re-running.
+#   - 500: reserved for unforeseen generator failures
+#     (``corpus inconsistency`` etc.). The comprehension
+#     ``ValueError`` branch is mirrored here.
+#   - 200 + ``IdiomExerciseOut`` otherwise.
+#
+# Hard rule surface (from card body):
+#   - #1 RAG-on is opt-in (read from body, default ``False``).
+#     The route stamps the echoed ``enable_rag`` flag on the
+#     response.
+#   - #2 ``/retrieve`` is consumed as-is by the generator; the
+#     route does NOT call ``/retrieve`` directly.
+#   - #3 ``exercise_type`` discriminator is
+#     ``Literal["idiom"]`` — stamped at response time by the
+#     ``IdiomExerciseOut`` default (``exercise_type="idiom"``).
+#   - #4 ``phrases`` is read-only at runtime. The route never
+#     writes to ``phrases``; only the seed scripts (8.1 / 8.2)
+#     insert.
+#   - #5 every state-mutating call is traced —
+#     ``generate_idiom`` owns the ``_trace_idiom`` call; the
+#     route doesn't add a second wrapper.
+#   - #6 existing callers stay byte-for-byte unchanged.
+#     ``generate_idiom`` is imported lazily inside the handler
+#     so the module-level ``main.py`` stays import-cheap; we
+#     never ``from app.idiom import ...`` at the top of the
+#     file.
+#
+# Curl example (for the README Phase 9 pass — not 8.4's
+# responsibility to add to README; included here for the
+# docstring):
+#
+#     curl -s -X POST http://localhost:18700/exercises/idiom \\
+#       -H "Content-Type: application/json" \\
+#       -H "Cookie: lexora_session=$LEXORA_SESSION" \\
+#       -b cookies.txt -c cookies.txt \\
+#       -d '{"word_id": 42}' | jq .
+#
+#     curl -s -X POST http://localhost:18700/exercises/idiom \\
+#       -H "Content-Type: application/json" \\
+#       -H "Cookie: lexora_session=$LEXORA_SESSION" \\
+#       -b cookies.txt -c cookies.txt \\
+#       -d '{"word_id": 42, "enable_rag": true}' | jq .
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/exercises/idiom",
+    response_model=schemas.IdiomExerciseOut,
+)
+def generate_idiom_exercise(
+    payload: schemas.IdiomGenerateRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Generate one idiom exercise for the logged-in learner.
+
+    Body: ``IdiomGenerateRequest`` — ``word_id`` (required, FK
+    to ``words.id``) + ``enable_rag`` (default ``False``).
+    The caller picks the target word; the generator fetches
+    the curated ``phrases`` row for that word and builds
+    the rest. There is no ``count`` knob — idiom generates
+    one exercise per call (mirrors comprehension, not
+    matching).
+
+    The route mirrors the comprehension endpoint's shape
+    exactly (Phase 6.5): thin handler, imports
+    ``app.idiom`` lazily so module-level ``main.py`` stays
+    import-cheap, locks ``prompt_template_version`` on the
+    way out, stamps a server-minted ``exercise_id`` so the
+    same id re-appears on the future ``grade_logs`` row for
+    Ragas join determinism.
+    """
+    import os
+    import time
+
+    from app.idiom import (
+        IdiomGenerationError,
+        IdiomNotFoundError,
+        PROMPT_TEMPLATE_VERSION,
+        generate_idiom,
+    )
+    from app.llm import LLMError
+
+    _idiom_started = time.perf_counter()
+    try:
+        exercise = generate_idiom(
+            db,
+            payload.word_id,
+            enable_rag=payload.enable_rag,
+        )
+    except IdiomNotFoundError as exc:
+        # 404 — the target ``word_id`` has no ``phrases`` row.
+        # Distinct from the comprehension endpoint's 500 — the
+        # card body explicitly demands 404 for this case (not
+        # 500). Mirrors ``GET /words/{word_id}``'s 404 on
+        # missing ``Word``.
+        logger.info(
+            "idiom: no phrases row for word_id=%d, returning 404",
+            exc.word_id,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=f"no phrases row exists for word_id={exc.word_id}",
+        )
+    except LLMError as exc:
+        logger.error(
+            "idiom: LLM transport failure for user_id=%d "
+            "word_id=%d enable_rag=%s: %s",
+            current_user.id,
+            payload.word_id,
+            payload.enable_rag,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"idiom generation failed: {exc}",
+        )
+    except IdiomGenerationError as exc:
+        # The trace is already recorded by ``generate_idiom``
+        # before it raises; we don't call ``_trace_idiom`` a
+        # second time. ``exercise`` is unbound in this branch
+        # (the exception fired before the assignment); log the
+        # trace metadata the dead-letter carries instead of
+        # guessing the target.
+        logger.error(
+            "idiom: schema dead-letter for user_id=%d "
+            "word_id=%d enable_rag=%s after %d attempt(s): %s",
+            current_user.id,
+            payload.word_id,
+            payload.enable_rag,
+            exc.schema_retry_count,
+            exc.last_validation_error,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "idiom_generation_failed",
+                "schema_retry_count": exc.schema_retry_count,
+                "last_validation_error": exc.last_validation_error,
+            },
+        )
+    except ValueError as exc:
+        # Corpus inconsistency — e.g. ``word_id`` resolves but
+        # the row's invariants are broken in the seed data.
+        # 500 — operator needs to look at the seed.
+        logger.error(
+            "idiom: corpus inconsistency for user_id=%d "
+            "word_id=%d: %s",
+            current_user.id,
+            payload.word_id,
+            exc,
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Stamp the wire-only fields: ``exercise_id`` (server-minted
+    # per generation, mirrors the comprehension / matching wire
+    # shapes for Ragas join determinism) and ``exercise_type``
+    # (the ``IdiomExerciseOut`` default already sets this to
+    # ``"idiom"``). Lock ``prompt_template_version`` on the way
+    # out so a future ``generate_idiom`` that forgets to set it
+    # can't desync the contract.
+    exercise_id = int.from_bytes(os.urandom(8), "big", signed=True)
+    idiom_latency_ms = int(
+        (time.perf_counter() - _idiom_started) * 1000
+    )
+    return schemas.IdiomExerciseOut.model_validate(
+        {
+            "exercise_id": exercise_id,
+            "target_word_id": exercise.word_id,
+            "word_id": exercise.word_id,
+            "prompt_template_version": PROMPT_TEMPLATE_VERSION,
+            "enable_rag": payload.enable_rag,
+            "trace_id": None,
+            "latency_ms": idiom_latency_ms,
+            "phrase": exercise.phrase,
+            "definition": exercise.definition,
+            "example_usage": exercise.example_usage,
+            "cloze_target": exercise.cloze_target,
+            "source_attribution": exercise.source_attribution,
+            "attested_quote": exercise.attested_quote,
+            "attested_source": exercise.attested_source,
+            "frequency_band": exercise.frequency_band,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Phase 5.4 — ``GET /exercises/due`` (card t_e8548d6d)
 #
 # The closed study loop's right half. Given an authenticated user,

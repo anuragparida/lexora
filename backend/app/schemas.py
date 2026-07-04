@@ -425,12 +425,18 @@ class BaseExerciseFields(BaseModel):
     ...`` and inherit every field listed here.
     """
 
-    exercise_type: Literal["cloze", "matching", "comprehension"] = Field(
+    exercise_type: Literal["cloze", "matching", "comprehension", "idiom"] = Field(
         default="cloze",
         description=(
             "Wire discriminator. Phase 6.1 ships the cloze-only "
             "branch; matching + comprehension widen this literal in "
-            "6.2 / 6.4."
+            "6.2 / 6.4; **Phase 8.3 (card t_fa86ac58) adds "
+            "``\"idiom\"``** as the 4th branch. Hard rule: widening "
+            "is wire-level + additive only; existing callers "
+            "parsing ``\"cloze\"`` / ``\"matching\"`` / "
+            "``\"comprehension\"`` see no change. The opposite "
+            "direction — narrowing — would silently break callers; "
+            "Phase 8 forbids it."
         ),
     )
     target_word_id: int = Field(
@@ -1617,3 +1623,336 @@ class CollocationExerciseOut(BaseExerciseFields):
             "matching collocations row exists (fail-soft)."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 8.4 — Idiom exercise request / response (card t_7c21c3f0)
+#
+# Wire surface for ``POST /exercises/idiom``. Mirrors the Phase 6.5
+# comprehension shape (request + response split) with three Phase 8
+# differences:
+#
+# 1. ``IdiomGenerateRequest`` carries a **required** ``word_id`` field
+#    (the caller picks the target word; the comprehension endpoint
+#    lets the server pick). The card body rationale: the
+#    ``phrases`` table is a curated corpus where each row is
+#    attached to a specific anchor word, so the caller has to
+#    name it. There's no ``count`` knob — idiom generates ONE
+#    exercise per call (mirrors comprehension, not matching).
+#
+# 2. ``source_attribution`` is a **closed literal** of three values
+#    (``"dwds"`` / ``"goethe"`` / ``"schiller"``) or a comma-joined
+#    subset (e.g. ``"dwds,goethe"`` when an idiom is attested in
+#    both). Each token must be a valid literal value — the
+#    ``field_validator`` enforces this so a typoed ``"goeth"`` is
+#    a 422 (the type system is the gate, per Phase 6 hard rule #2).
+#
+# 3. ``BaseExerciseFields.exercise_type`` is widened to include
+#    ``"idiom"`` (Phase 8.3 Hard rule #1 — additive only; existing
+#    callers parsing the 3-value union see no change). The
+#    discriminator is narrowed back to ``Literal["idiom"]`` on
+#    ``IdiomExerciseOut.exercise_type`` so an attempt to set
+#    ``exercise_type="cloze"`` on an ``IdiomExerciseOut`` is a 422.
+#
+# Hard rule surface (from card body):
+#   - #1 RAG-on is opt-in via ``enable_rag: bool = False`` on the
+#     request body (mirrors comprehension + cloze).
+#   - #2 ``/retrieve`` consumed as-is by the RAG-on branch of
+#     ``generate_idiom`` — the route layer never imports the
+#     retrieval helper directly.
+#   - #3 Literal widening is wire-level. The 3 existing endpoints
+#     (cloze / matching / comprehension) parse as before.
+#   - #6 422 on ``source_attribution`` outside the literal is
+#     tested explicitly in ``tests/test_idiom_endpoint.py``.
+# ---------------------------------------------------------------------------
+
+
+IdiomSource = Literal["dwds", "goethe", "schiller"]
+IdiomFrequencyBand = Literal["high", "mid", "low"]
+
+
+# Canonical separator for comma-joined source attribution values.
+# Locked to ``,`` (no spaces) so the round-trip
+# parse / serialise preserves the original tokens — a future
+# `set in ["dwds", "goethe"]`-style check on the wire side stays
+# trivially implementable.
+_IDIOM_SOURCE_SEP: str = ","
+
+# Allowed per-token values (used by the field_validator below).
+# Re-exported so tests can assert against the canonical set
+# without re-declaring it.
+_IDIOM_SOURCE_TOKENS: frozenset[str] = frozenset({"dwds", "goethe", "schiller"})
+
+
+class IdiomExerciseOut(BaseExerciseFields):
+    """Response shape for ``POST /exercises/idiom`` (Phase 8.4 route).
+
+    Wire contract (locked by the card body's "Same as Phase 6.5"
+    clause + the Phase 8.4 idiomatic fields):
+
+    - ``exercise_type`` is narrowed to ``Literal["idiom"]`` from
+      the Phase 8.3-widened base literal. Setting
+      ``exercise_type="cloze"`` on this model is a
+      ``ValidationError``.
+    - ``word_id`` is required on the request *and* round-trips on
+      the response — the caller has chosen the target word, so
+      the response echoes it for the frontend's study-session
+      log row.
+    - ``phrase`` is the German idiom (5..200 chars).
+    - ``definition`` is the learner-friendly meaning (1..400 chars;
+      the LLM is asked to compress long DWDS definitions, mirroring
+      the Phase 6.5 comprehension rationale rule — PHASE-8.md
+      gotcha #5).
+    - ``example_usage`` is a worked German example sentence
+      (5..400 chars).
+    - ``cloze_target`` is the idiom phrase with ONE word blanked
+      for the cloze-within-idiom variant (Phase 8.4 card body
+      item 1). ``None`` when the LLM emits a non-cloze variant;
+      always populated when the prompt asks for the cloze variant.
+    - ``source_attribution`` is a comma-joined subset of the
+      closed ``IdiomSource`` literal (e.g. ``"dwds"`` or
+      ``"dwds,goethe"``). The ``field_validator`` enforces the
+      per-token constraint — a typoed token is a 422.
+    - ``attested_quote`` / ``attested_source`` carry the Goethe /
+      Schiller attestation from the Phase 8.2 seed (the readings
+      that prove the idiom is in the literary corpus). ``None``
+      when the row only has a DWDS source.
+
+    ``exercise_id`` is server-minted per generation
+    (``int.from_bytes(os.urandom(8), "big", signed=True)``); the
+    same id re-appears on the ``grade_logs`` row for Ragas join
+    determinism (Phase 6.6 pattern carries forward).
+    """
+
+    exercise_type: Literal["idiom"] = "idiom"
+    exercise_id: int = Field(
+        ...,
+        description=(
+            "Server-minted per generation: "
+            "int.from_bytes(os.urandom(8), 'big', signed=True). "
+            "Mirrors the matching wire shape (6.2 / 6.3) and the "
+            "comprehension wire shape (6.4 / 6.5) so a future "
+            "/exercises/grade call (Phase 6.6) can dispatch on the "
+            "id without caring about the exercise type literal."
+        ),
+    )
+    word_id: int = Field(
+        ...,
+        description=(
+            "FK to words.id of the target word the idiom is "
+            "anchored to. Echoed from the request — the caller "
+            "picked it, the response confirms it. Phase 8.4 / "
+            "IdiomGenerateRequest requires the field; the "
+            "response mirrors it for the frontend's study-session "
+            "log row."
+        ),
+    )
+    phrase: str = Field(
+        ...,
+        min_length=5,
+        max_length=200,
+        description=(
+            "The German idiom. 5..200 chars. Bounds locked by the "
+            "card body — most idioms are 2-5 words, so 5 chars "
+            "rules out accidental single-word submissions and "
+            "200 caps any forced long-form explosion."
+        ),
+    )
+    definition: str = Field(
+        ...,
+        min_length=1,
+        max_length=400,
+        description=(
+            "Learner-friendly definition. 1..400 chars. The LLM "
+            "prompt asks for a short learner-friendly "
+            "paraphrase; long DWDS dictionary forms are "
+            "compressed at generation time. PHASE-8.md gotcha "
+            "#5 documents the variance in raw DWDS length."
+        ),
+    )
+    example_usage: str = Field(
+        ...,
+        min_length=5,
+        max_length=400,
+        description=(
+            "Worked German example sentence. 5..400 chars. "
+            "Mirrors cloze's ``sentence_with_blank`` shape "
+            "(4.2), but without the ``___`` marker — the idiom "
+            "exercise uses ``phrase`` as the cloze surface in a "
+            "future Phase 9 UX variant."
+        ),
+    )
+    cloze_target: Optional[str] = Field(
+        default=None,
+        description=(
+            "The idiom phrase with ONE word blanked (e.g. "
+            "``'Tomaten auf ___ Augen'``) for the cloze-within-"
+            "idiom variant. ``None`` when the prompt asks for "
+            "the non-cloze variant — the field is always "
+            "populated when cloze is requested. The Phase 9 UX "
+            "may render this as the cloze; Phase 8.4's wire only "
+            "carries it."
+        ),
+    )
+    source_attribution: str = Field(
+        ...,
+        description=(
+            "Provenance of the idiom row, comma-joined from the "
+            "closed ``IdiomSource`` literal. Examples: "
+            "``\"dwds\"``, ``\"goethe\"``, ``\"schiller\"``, "
+            "``\"dwds,goethe\"``. Per-token validation runs via "
+            "_validate_source_attribution; a typoed token like "
+            "``\"goeth\"`` is rejected with a 422 — the type "
+            "system is the gate (Hard rule #2 of Phase 6)."
+        ),
+    )
+    attested_quote: Optional[str] = Field(
+        default=None,
+        description=(
+            "Attested quote from the Goethe/Schiller corpus "
+            "(Phase 8.2). ``None`` when the row is DWDS-only. "
+            "The frontend renders the quote in the study-"
+            "session card to ground the idiom in literature."
+        ),
+    )
+    attested_source: Optional[str] = Field(
+        default=None,
+        description=(
+            "Work + chapter / page citation for ``attested_quote``. "
+            "``None`` when no literary attestation exists for "
+            "the row. Phase 9 may add a citation-formatter; "
+            "Phase 8.4 carries the raw string from the seed."
+        ),
+    )
+    frequency_band: IdiomFrequencyBand = Field(
+        ...,
+        description=(
+            "Manual frequency bucketing from the Phase 8.1 seed. "
+            "``\"high\"`` = top-100 most common, ``\"mid\"`` = "
+            "next 100, ``\"low\"`` = the rest. Drives the Phase "
+            "9 high-band-first cloze variant."
+        ),
+    )
+    enable_rag: bool = Field(
+        default=False,
+        description=(
+            "Echoed from the request. ``True`` when the caller "
+            "passed ``enable_rag=True`` AND the RAG-on branch of "
+            "``generate_idiom`` actually injected a neighbour "
+            "into the prompt. ``False`` on the no-RAG path "
+            "(default) or on the SQLite fallback (the retrieval "
+            "helper returns ``[]`` and the prompt stays no-RAG)."
+        ),
+    )
+
+    @field_validator("source_attribution")
+    @classmethod
+    def _validate_source_attribution(cls, v: str) -> str:
+        """Per-token validation on the comma-joined source.
+
+        Pydantic v2's ``Field(...)`` doesn't support
+        ``min_length`` / ``max_length`` on a comma-joined string
+        with per-token semantics, so we run a ``field_validator``
+        instead.
+
+        The set of allowed tokens is closed (``IdiomSource``
+        literal). Empty strings and stray tokens are rejected at
+        validation time so a typoed ``"goeth"`` is a 422 on the
+        dead-letter path, not a runtime surprise in Phase 9.
+
+        Mirrors the matching ``_validate_choices`` pattern
+        (Phase 6.4) — type-level guardrail at the wire boundary.
+        """
+        if not isinstance(v, str):
+            raise ValueError(
+                f"source_attribution must be a string; got "
+                f"{type(v).__name__}"
+            )
+        # Empty string is rejected — every row is attributed to
+        # at least one source.
+        if v == "":
+            raise ValueError(
+                "source_attribution must be a non-empty comma-"
+                "joined subset of {dwds, goethe, schiller}"
+            )
+        tokens = v.split(_IDIOM_SOURCE_SEP)
+        for tok in tokens:
+            tok_stripped = tok.strip()
+            if not tok_stripped:
+                # Consecutive separators or trailing separator
+                # (``"dwds,"`` or ``"dwds,,goethe"``) — reject
+                # explicitly. A future caller who strips at the
+                # client side is encouraged, but the wire form
+                # is strict.
+                raise ValueError(
+                    f"source_attribution tokens must not be empty; "
+                    f"got {v!r} (split on {repr(_IDIOM_SOURCE_SEP)})"
+                )
+            if tok_stripped not in _IDIOM_SOURCE_TOKENS:
+                raise ValueError(
+                    f"source_attribution token {tok_stripped!r} is "
+                    f"not in {sorted(_IDIOM_SOURCE_TOKENS)} "
+                    f"(full value: {v!r})"
+                )
+        # Round-trip check: serialising the parsed tokens with
+        # the canonical separator must equal the input value
+        # (forwards-compat: rejects ``"dwds; goethe"`` style
+        # values up-front instead of silently normalising).
+        rebuilt = _IDIOM_SOURCE_SEP.join(t.strip() for t in tokens)
+        if rebuilt != v:
+            raise ValueError(
+                f"source_attribution must be a comma-joined string "
+                f"with no whitespace around the separator; got "
+                f"{v!r}, expected {rebuilt!r}"
+            )
+        return v
+
+
+class IdiomGenerateRequest(BaseModel):
+    """Request body for ``POST /exercises/idiom`` (Phase 8.4).
+
+    Shape:
+
+    - ``word_id`` (required) — FK to ``words.id`` of the target
+      word the idiom row is anchored to. Mirrors the comprehension
+      request's missing-field shape (``word_id`` is idiomatic to
+      the idiom corpus; cloze / comprehension let the server pick
+      the word, but the idiom table has per-word curation so the
+      caller has to pick).
+    - ``enable_rag`` (default ``False``) — opt-in flag for the
+      RAG-on branch of ``generate_idiom``. When ``True``, the
+      generator fetches the top-1 nearest-neighbour from the
+      ``phrases`` table by embedding cosine and embeds its
+      ``definition`` + ``attested_quote`` in the prompt.
+      When ``False`` (default), the prompt is byte-for-byte
+      identical to the no-RAG variant (Hard rule #2 of Phase 6).
+
+    There is **no** ``count`` knob — idiom generates one exercise
+    per call (mirrors comprehension, not matching).
+    """
+
+    word_id: int = Field(
+        ...,
+        ge=1,
+        description=(
+            "FK to words.id of the target word. Required: the "
+            "``phrases`` table is per-word curated (Phase 8.1) "
+            "so the caller must pick the anchor word. A "
+            "``word_id`` with no ``phrases`` row surfaces as 404 "
+            "in the route layer."
+        ),
+    )
+    enable_rag: bool = Field(
+        default=False,
+        description=(
+            "Opt-in flag for retrieval-augmented prompting. "
+            "When ``True``, the generator fetches the top-1 "
+            "nearest-neighbour from the ``phrases`` table by "
+            "embedding cosine and embeds its ``definition`` + "
+            "``attested_quote`` in the prompt. Falls back to the "
+            "no-RAG variant on any retrieval / embedding failure. "
+            "When ``False`` (default), the prompt is the no-RAG "
+            "variant — byte-for-byte stable."
+        ),
+    )
+
