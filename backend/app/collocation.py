@@ -79,11 +79,9 @@ import random
 from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import Session
 
 from app import crud, models
-from app.database import Base
 from app.llm import _DSPyOpenAICompatLM  # the shared adapter; see app.llm docstring
 from app.observability import get_langfuse
 
@@ -111,51 +109,21 @@ PARTNER_REGISTER: tuple[str, ...] = ("formal", "neutral", "colloquial")
 
 
 # ---------------------------------------------------------------------------
-# Read-only SQLAlchemy mirror for the ``collocations`` table.
+# Re-export the canonical ``Collocation`` ORM model from ``app.models``.
 #
-# The canonical model ships in 7.1's ``app/models.py`` schema migration.
-# This local copy is a READ-ONLY reader (no insert/update/delete helpers
-# exported, no relationship to other tables) so 7.2 compiles and the
-# generator can query before 7.1 lands on main.
+# Phase 7.2 originally declared a local mirror (``id`` / ``target_word_id``)
+# to compile before 7.1 landed. With 7.1 on main, the canonical model in
+# ``app.models.Collocation`` is the single source of truth — ``collocation_id``
+# PK, ``headword_id`` FK, plus ``partner_lemma`` / ``frequency_score`` /
+# ``register`` / ``source_corpus`` / ``created_at``.
 #
-# When 7.1 merges, both models map to the same ``collocations`` table
-# by name; SQLAlchemy will raise on a duplicate ``Base`` registration
-# only if both are loaded into the same ``Base.metadata`` *and* one
-# tries to issue DDL. Because this module imports ``Base`` from
-# ``app.database`` (the same metadata registry), the 7.1 migration is
-# the single source of truth on disk — this local model is a fallback
-# for the pre-7.1 dev environment.
-#
-# Column set mirrors the spec: ``id``, ``target_word_id`` (FK to
-# ``words.id``), ``partner_lemma``, ``partner_register``, ``source_corpus``
-# (Literal["dwds", "wiktionary", "manual"], locked by PHASE-7 gotcha #12),
-# ``created_at`` (nullable; 7.1's hard rule #1). No nullable columns
-# are exposed as Pydantic response fields.
+# 7.2's queries filter on ``headword_id`` (was ``target_word_id``) and the
+# chosen PK is ``collocation_id`` (was ``id``). See ``select_collocation_row``
+# below.
 # ---------------------------------------------------------------------------
 
 
-class Collocation(Base):
-    """READ-ONLY mirror of the ``collocations`` table (Phase 7.1 schema).
-
-    Used by ``generate_collocation`` and ``select_collocation_row`` to
-    issue SELECTs against the seeded corpus. No helper functions for
-    INSERT / UPDATE / DELETE are exported — the runtime read-only
-    invariant (Hard rule #2) is enforced by omission.
-
-    The column set mirrors 7.1's authoritative migration so the
-    mirror continues to work after 7.1 lands: same ``__tablename__``,
-    same column names, same nullability. If 7.1 widens the schema,
-    the canonical model in ``app.models`` is the source of truth;
-    this mirror is the pre-7.1 dev fallback.
-    """
-
-    __tablename__ = "collocations"
-
-    id = Column(Integer, primary_key=True, index=True)
-    target_word_id = Column(Integer, nullable=False, index=True)
-    partner_lemma = Column(String, nullable=False)
-    partner_register = Column(String, nullable=False)  # Literal["formal","neutral","colloquial"]
-    source_corpus = Column(String, nullable=False)  # Literal["dwds","wiktionary","manual"]
+Collocation = models.Collocation
 
 
 # ---------------------------------------------------------------------------
@@ -348,10 +316,10 @@ def select_collocation_row(
         500.
     """
     candidates: list[int] = [
-        row.id
+        row.collocation_id
         for row in db.query(Collocation)
-        .filter(Collocation.target_word_id == target_word_id)
-        .order_by(Collocation.id)
+        .filter(Collocation.headword_id == target_word_id)
+        .order_by(Collocation.collocation_id)
         .all()
     ]
     if not candidates:
@@ -365,7 +333,7 @@ def select_collocation_row(
     chosen_id = rng.choice(candidates)
     row = (
         db.query(Collocation)
-        .filter(Collocation.id == chosen_id)
+        .filter(Collocation.collocation_id == chosen_id)
         .one_or_none()
     )
     if row is None:
@@ -500,7 +468,7 @@ def build_prompt(
         },
         "collocation": {
             "partner_lemma": collocation.partner_lemma,
-            "partner_register": collocation.partner_register,
+            "partner_register": collocation.register,
             "source_corpus": collocation.source_corpus,
         },
         "learner_axes": weakness_axes,
@@ -640,9 +608,9 @@ def generate_collocation(
         "user_id": user_id,
         "weakness_axes": weakness_axes,
         "word_id": word.id,
-        "collocation_id": collocation.id,
+        "collocation_id": collocation.collocation_id,
         "partner_lemma": collocation.partner_lemma,
-        "partner_register": collocation.partner_register,
+        "partner_register": collocation.register,
         "source_corpus": collocation.source_corpus,
         "model_id": _default_model(),
         "prompt_template_version": PROMPT_TEMPLATE_VERSION,

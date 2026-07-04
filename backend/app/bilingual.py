@@ -19,13 +19,21 @@ field on the response is ``str | None``; ``None`` is the
 default — bilingual is opt-in (Hard rule H3 of PHASE-7.md).
 
 The 7.1 schema migration creates ``collocations`` with at least
-the columns ``word_id`` (FK to ``words.id``) and
+the columns ``headword_id`` (FK to ``words.id``) and
 ``partner_lemma`` (the curated EN string). We query via raw SQL
 because no SQLAlchemy model for ``collocations`` exists on
 ``main`` yet — this card lands before 7.1 ships, so adding a
 model would create a merge conflict with 7.1. Once 7.1 lands,
 this helper continues to work unchanged because the column
-names + ``word_id`` FK are stable on both sides.
+names + ``headword_id`` FK are stable on both sides.
+
+Reconciliation note (post-7.1 fold): the original helper queried
+``WHERE word_id = :word_id`` assuming 7.1's FK column would be
+``word_id``. The canonical ``app.models.Collocation`` (7.1)
+ships with ``headword_id`` instead. The fix below updates the
+query to ``headword_id``; the helper still queries by raw SQL
+and is still fail-soft, so a future schema rename will land as
+a one-line edit here.
 """
 from __future__ import annotations
 
@@ -95,12 +103,12 @@ def lookup_partner_translation(
     try:
         # Raw SQL because no SQLAlchemy ``Collocations`` model
         # exists on ``main`` yet. The columns are stable
-        # (``word_id`` + ``partner_lemma``) so 7.1's migration
+        # (``headword_id`` + ``partner_lemma``) so 7.1's migration
         # doesn't change this query.
         row = db.execute(
             text(
                 "SELECT partner_lemma FROM collocations "
-                "WHERE word_id = :word_id LIMIT 1"
+                "WHERE headword_id = :word_id LIMIT 1"
             ),
             {"word_id": int(word_id)},
         ).first()

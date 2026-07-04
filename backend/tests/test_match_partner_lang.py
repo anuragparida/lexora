@@ -149,18 +149,19 @@ def _create_collocations_table(session) -> None:
     # ``partner_lemma`` is the curated EN counterpart; ``lemma``
     # is the German collocation phrase (kept minimal here — the
     # generator only reads ``partner_lemma``). We mirror the 7.1
-    # schema shape (``word_id`` FK + ``partner_lemma`` column).
+    # schema shape (``headword_id`` FK + ``partner_lemma`` column).
     session.execute(
         text(
             """
             CREATE TABLE IF NOT EXISTS collocations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                word_id INTEGER NOT NULL,
-                lemma VARCHAR NOT NULL DEFAULT '',
+                collocation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                headword_id INTEGER,
                 partner_lemma VARCHAR NOT NULL,
-                source_corpus VARCHAR NOT NULL DEFAULT 'manual',
+                frequency_score FLOAT NOT NULL DEFAULT 0.5,
                 register VARCHAR NOT NULL DEFAULT 'neutral',
-                FOREIGN KEY (word_id) REFERENCES words(id)
+                source_corpus VARCHAR NOT NULL DEFAULT 'manual',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (headword_id) REFERENCES words(id)
             )
             """
         )
@@ -175,11 +176,17 @@ def _seed_collocation_row(
     session.execute(
         text(
             """
-            INSERT INTO collocations (word_id, lemma, partner_lemma)
-            VALUES (:word_id, :lemma, :partner_lemma)
+            INSERT INTO collocations (headword_id, partner_lemma, frequency_score, register, source_corpus)
+            VALUES (:headword_id, :partner_lemma, :frequency_score, :register, :source_corpus)
             """
         ),
-        {"word_id": word_id, "lemma": "(test)", "partner_lemma": partner_lemma},
+        {
+            "headword_id": word_id,
+            "partner_lemma": partner_lemma,
+            "frequency_score": 0.5,
+            "register": "neutral",
+            "source_corpus": "manual",
+        },
     )
     session.commit()
 

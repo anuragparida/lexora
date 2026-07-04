@@ -170,23 +170,24 @@ def _seed_collocation(
     partner_register: str = "neutral",
     source_corpus: str = "dwds",
 ) -> int:
-    """Insert one ``Collocation`` row (read-only mirror) and return id.
+    """Insert one ``Collocation`` row and return its id.
 
-    We use the mirror class from ``app.collocation`` so the row is
-    visible to ``select_collocation_row``. The SQLAlchemy metadata
-    registry has already picked up the mirror at import time
-    (``Base.metadata``).
+    Uses the canonical ``app.models.Collocation`` (Phase 7.1's
+    authoritative schema). Maps the test's ``target_word_id`` →
+    ``headword_id`` (FK to ``words.id``) and ``partner_register`` →
+    ``register``.
     """
     row = Collocation(
-        target_word_id=target_word_id,
+        headword_id=target_word_id,
         partner_lemma=partner_lemma,
-        partner_register=partner_register,
+        register=partner_register,
         source_corpus=source_corpus,
+        frequency_score=0.5,
     )
     session.add(row)
     session.flush()
     session.commit()
-    return row.id
+    return row.collocation_id
 
 
 # ---------------------------------------------------------------------------
@@ -534,8 +535,8 @@ def test_select_collocation_row_deterministic_per_user_word_pair(
 
     row1 = collocation.select_collocation_row(db_session, user_id, wid)
     row2 = collocation.select_collocation_row(db_session, user_id, wid)
-    assert row1.id == row2.id
-    assert row1.target_word_id == wid
+    assert row1.collocation_id == row2.collocation_id
+    assert row1.headword_id == wid
 
 
 def test_select_collocation_row_different_users_may_get_different_rows(

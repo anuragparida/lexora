@@ -178,19 +178,27 @@ def _seed_collocation(
     partner_register: str = "neutral",
     source_corpus: str = "dwds",
 ) -> int:
-    """Insert one ``Collocation`` row (Phase 7.1 mirror) and return id."""
-    from app.collocation import Collocation
+    """Insert one ``Collocation`` row (Phase 7.1 canonical model) and return id.
+
+    Uses ``app.models.Collocation`` (the 7.1 source-of-truth schema)
+    rather than the pre-7.1 ``app.collocation.Collocation`` mirror.
+    The wire shape keeps ``partner_register`` (a Pydantic field on
+    ``CollocationExerciseOut``), but the DB column is the canonical
+    ``register`` (Hard rule #2 of PHASE-7.md).
+    """
+    from app.models import Collocation
 
     row = Collocation(
-        target_word_id=target_word_id,
+        headword_id=target_word_id,
         partner_lemma=partner_lemma,
-        partner_register=partner_register,
+        register=partner_register,
+        frequency_score=0.5,
         source_corpus=source_corpus,
     )
     session.add(row)
     session.flush()
     session.commit()
-    return row.id
+    return row.collocation_id
 
 
 # ---------------------------------------------------------------------------

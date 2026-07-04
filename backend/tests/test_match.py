@@ -1122,18 +1122,33 @@ def test_matching_exercise_out_is_base_plus_pairs():
     ``exercise_id`` to ``MatchingExerciseOut`` itself so the
     matching route still carries the server-minted id the
     grader expects.
+
+    Phase 7.4 reconcile: ``partner_translation`` (the bilingual
+    read-through field, populated when ``partner_lang="en"``)
+    was added to ``MatchingExerciseOut``. The base + ``{pairs,
+    exercise_id}`` expectation widens to ``{pairs, exercise_id,
+    partner_translation}`` — the test mirrors the actual wire
+    surface.
     """
     from app.schemas import MatchingExerciseOut, BaseExerciseFields
 
     base_fields = set(BaseExerciseFields.model_fields.keys())
     subclass_fields = set(MatchingExerciseOut.model_fields.keys())
-    # Subclass = base + {"pairs", "exercise_id"}; the matching
-    # response narrows ``exercise_type`` from the union on the
-    # base down to the matching branch, which the field set
-    # check handles as a no-op (same key, narrower annotation).
-    assert subclass_fields == base_fields | {"pairs", "exercise_id"}
+    # Subclass = base + {"pairs", "exercise_id", "partner_translation"};
+    # the matching response narrows ``exercise_type`` from the
+    # union on the base down to the matching branch, which the
+    # field set check handles as a no-op (same key, narrower
+    # annotation). ``partner_translation`` is the Phase 7.4
+    # bilingual read-through field — only on the matching wire
+    # (the cloze wire has its own copy on ``ClozeExerciseOut``).
+    assert subclass_fields == base_fields | {
+        "pairs",
+        "exercise_id",
+        "partner_translation",
+    }
     assert "pairs" in subclass_fields
     assert "exercise_id" in subclass_fields
+    assert "partner_translation" in subclass_fields
 
 
 def test_matching_exercise_out_rejects_pairs_below_min():

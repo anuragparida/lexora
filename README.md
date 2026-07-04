@@ -442,30 +442,35 @@ pnpm dev
 | POST | `/decks/generate` | Build an `.apkg` deck from filtered words |
 | GET | `/decks/list` | List previously generated decks |
 | GET | `/retrieve?query=&k=&source=` | Top-K nearest neighbours by cosine distance (Phase 1, Postgres + pgvector only) |
-| POST | `/exercises/cloze` | Generate one cloze exercise for the logged-in learner (Phase 4.2 + Phase 6.1; auth-gated; accepts optional `{"enable_rag": bool}` body) |
-| POST | `/exercises/match` | Generate one matching exercise (`count` pairs, default 4, range `[2, 8]`; accepts optional `{"count": int, "enable_rag": bool}` body; Phase 6.2 + Phase 6.3; auth-gated) |
+| POST | `/exercises/cloze` | Generate one cloze exercise for the logged-in learner (Phase 4.2 + Phase 6.1 + Phase 7.3 collocation + Phase 7.4 partner_lang; auth-gated; accepts optional `{"enable_rag": bool, "collocation": bool, "partner_lang": "de"|"en"}` body) |
+| POST | `/exercises/match` | Generate one matching exercise (`count` pairs, default 4, range `[2, 8]`; accepts optional `{"count": int, "enable_rag": bool, "partner_lang": "de"|"en"}` body; Phase 6.2 + Phase 6.3 + Phase 7.4 bilingual; auth-gated) |
 | POST | `/exercises/comprehension` | Generate one comprehension exercise (3–5 sentence passage + multiple-choice question; accepts optional `{"enable_rag": bool}` body; Phase 6.4 + Phase 6.5; auth-gated) |
 | POST | `/exercises/grade` | Persist a grade for a generated exercise; `exercise_type` widened to `Literal["cloze", "matching", "comprehension"]` in Phase 6.6 (Phase 5.3 route + Phase 6.6 widening; auth-gated) |
 
 ## Limitations (Phase 7)
 
-Phase 7 (pending fold): collocations + prepositional-objects
-schema + retrieval-quality A/B; bilingual exercise opt-in
+Phase 7 (folded): collocations + prepositional-objects schema
++ retrieval-quality A/B; bilingual exercise opt-in
 (`partner_lang`); bge-m3 one-env-var swap via `EMBEDDING_MODEL`.
-Builds on `perseus/7-*` branches; see `docs/PHASE-7.md` for the
-spec. The honest constraints at this snapshot:
+Builds landed on `main` via commits `ebcb534` (7.1) + `a2447df`
+(7.2) + `a48dd0c` (7.3) + `8b4609d` (7.4) + `4895e94` (7.5); see
+`docs/PHASE-7.md` for the spec. The honest constraints at this
+snapshot:
 
-- **Retrieval-quality A/B lift (Phase 7.5):** TODO: lift on
-  `context_precision`, `context_recall`, `faithfulness`,
-  `answer_relevance`. The Phase 7.5 A/B runner is
-  `backend/scripts/eval_retrieval_compare.py`; its report lands
-  in `eval/retrieval_compare_report.md` once 7.5 ships. The
-  `RETRIEVAL_MIN_QUALITY_FLOOR` is a hard-coded module constant
-  in `backend/app/eval/retrieval_compare.py` (Hard rule #7 —
-  no env-derived thresholds). Numbers in this row stay as
-  `TODO` placeholders until 7.5 lands on `main`; flip them
-  off the placeholders once `eval/retrieval_compare_report.md`
-  exists.
+- **Retrieval-quality A/B verdict (Phase 7.5):** `no_significant_lift`
+  on `context_precision`, `context_recall`, `faithfulness`,
+  `answer_relevance` for the v80 held-out cloze set. Run
+  `make eval-retrieval-compare` to refresh both per-row CSVs
+  (`eval/retrieval_compare/current_per_row.csv` +
+  `bge_m3_per_row.csv`) and the markdown comparison table
+  (`eval/retrieval_compare/retrieval_compare_report.md`). The
+  `RETRIEVAL_MIN_QUALITY_FLOOR = 0.05` is a hard-coded module
+  constant in `backend/app/eval/retrieval_compare.py` (Hard rule
+  #7 — no env-derived thresholds). The A/B currently runs in
+  dry-run (deterministic-template) mode because OpenRouter's
+  privacy filter blocks `bge-m3` as a chat-model call;
+  `bge-m3` loads from the local `sentence-transformers` cache
+  on a warm HuggingFace pull (~2.3GB on first download).
 - **Phase 7 schema-curated, not LLM-learned:** collocations +
   prepositional-objects are hand-curated from DWDS + Wiktionary
   subsets (≥200 rows each). Generator reads, never writes. No
