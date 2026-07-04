@@ -1522,10 +1522,16 @@ def grade_exercise(
             return _grade_comprehension(db, current_user, payload)
         case _:  # pragma: no cover — schema gate rejects this
             # Defensive fallback. The ``GradeRequest`` schema's
-            # 3-way ``ExerciseType`` literal should have rejected
-            # anything outside the union upstream; if we reach
-            # here, the schema gate has been bypassed and we want
-            # a clean 422 rather than a 500.
+            # 4-way ``ExerciseType`` literal
+            # (Phase 8.3 widened it from 3 to 4 via card
+            # t_fa86ac58) should have rejected anything outside
+            # the union upstream; if we reach here, the schema
+            # gate has been bypassed and we want a clean 422
+            # rather than a 500. Note: ``"idiom"`` exercises
+            # route to ``_grade_one`` once Phase 9 adds the
+            # FSRS-graded-recall surface; until then a grade
+            # request with ``exercise_type="idiom"`` is
+            # intentionally a 422.
             raise HTTPException(
                 status_code=422,
                 detail=f"unsupported exercise_type: {payload.exercise_type}",

@@ -60,22 +60,31 @@ from app.schemas import (
 
 
 class TestExerciseTypeLiteral:
-    """Phase 6.6 (card t_d11d0011) — the closed 3-way
-    ``ExerciseType`` alias is the single source of truth for the
-    grade-route wire guardrail. The alias is a
-    ``typing.Literal`` — it isn't runtime-constructible, so we
-    drive a ``TypeAdapter`` to validate against the union.
+    """Phase 6.6 (card t_d11d0011) — the ``ExerciseType`` alias is
+    the single source of truth for the grade-route wire
+    guardrail. The alias is a ``typing.Literal`` — it isn't
+    runtime-constructible, so we drive a ``TypeAdapter`` to
+    validate against the union.
+
+    Phase 8.3 (card t_fa86ac58) widens the alias from the original
+    3-way to a 4-way by adding ``"idiom"``. The widening is
+    additive (Phase 7 hard rule #1 — Literal widening is
+    wire-level; never narrow).
     """
 
-    def test_exercise_type_literal_is_closed_three_way(self):
-        """The ``ExerciseType`` literal covers exactly three
-        values: ``cloze``, ``matching``, ``comprehension``. Any
-        other value rejects.
+    def test_exercise_type_literal_is_closed_four_way(self):
+        """The ``ExerciseType`` literal covers the four wired
+        values: ``cloze``, ``matching``, ``comprehension``,
+        ``idiom``. Any other value rejects.
+
+        Phase 6.6 shipped the original 3-way literal. Phase 8.3
+        widens it to include ``"idiom"`` (additive — Phase 7 hard
+        rule #1 carries forward verbatim).
         """
         adapter = TypeAdapter(ExerciseType)
 
-        # The three valid types round-trip.
-        for v in ("cloze", "matching", "comprehension"):
+        # The four valid types round-trip.
+        for v in ("cloze", "matching", "comprehension", "idiom"):
             assert adapter.validate_python(v) == v
 
         # Anything else is a ValidationError — including the
@@ -87,6 +96,7 @@ class TestExerciseTypeLiteral:
             "writing",
             "CLOZE",
             "MATCHING",
+            "IDIOM",
             "",
             "cloze ",
             "cloze-extra",
@@ -94,15 +104,20 @@ class TestExerciseTypeLiteral:
             with pytest.raises(ValidationError):
                 adapter.validate_python(v)
 
-    def test_exercise_type_literal_exposes_three_members(self):
-        """The literal exposes exactly three members via
-        ``get_args`` — pins the closed 3-way shape so a future
-        widening card has to update this test explicitly.
+    def test_exercise_type_literal_exposes_four_members(self):
+        """The literal exposes four members via ``get_args`` —
+        pins the closed 4-way shape so a future widening card
+        has to update this test explicitly.
+
+        Phase 8.3 widens from 3 to 4 (``"idiom"`` is the new
+        member). Phase 7 hard rule #1 says: widening is
+        wire-level; never narrow.
         """
         assert set(get_args(ExerciseType)) == {
             "cloze",
             "matching",
             "comprehension",
+            "idiom",
         }
 
 
