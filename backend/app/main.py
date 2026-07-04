@@ -569,20 +569,37 @@ def write_weakness_profile(
 # (word selection is server-driven from the user's weakness profile).
 # Response: the ``ClozeExercise`` Pydantic model.
 #
-# No grading endpoint — Phase 5 wires ``py-fsrs`` + the matching
-# exercise type + a ``POST /exercises/grade`` route on top of this.
+# Phase 6.1 widens the request with ``enable_rag``; Phase 7.3 widens
+# it with ``collocation`` (card t_bdd6ab24).
+#
+# Two response branches (Phase 7.3):
+#
+# - ``collocation=False`` (default) — wraps the standard
+#   ``ClozeExerciseOut`` payload as
+#   ``{collocation: false, partner_lemma: null, <ClozeExerciseOut
+#   fields>...}``. Prompt bytes match Phase 6.1 verbatim (Hard
+#   rule H10).
+# - ``collocation=True`` — wraps the ``CollocationExerciseOut``
+#   payload as
+#   ``{collocation: true, partner_lemma: <value>, <CollocationExerciseOut
+#   fields>...}``. Prompt template / generator is ``Phase 7.2``'s
+#   ``generate_collocation``.
 #
 # Errors:
 # - 401: missing / invalid JWT (raised by ``get_current_user``).
 # - 502: LLM transport / provider error or persistent schema
-#   violation (``ClozeGenerationError``). The body carries the
+#   violation (``ClozeGenerationError`` /
+#   ``CollocationGenerationError``). The body carries the
 #   structured fields so an operator can triage without re-running.
 # - 500: corpus inconsistency (e.g. ``select_target_word`` raised
 #   ``ValueError`` because the mapped ``word_type`` has zero rows).
 # ---------------------------------------------------------------------------
 
 
-@app.post("/exercises/cloze", response_model=schemas.ClozeExerciseOut)
+@app.post(
+    "/exercises/cloze",
+    response_model=schemas.ClozeGenerateResponse,
+)
 def generate_cloze_exercise(
     payload: schemas.ClozeGenerateRequest = schemas.ClozeGenerateRequest(),
     current_user: models.User = Depends(auth.get_current_user),
@@ -591,45 +608,194 @@ def generate_cloze_exercise(
     """Generate one cloze exercise for the logged-in learner.
 
     The route is intentionally thin — all logic lives in
-    ``app.cloze.generate_cloze``. We import lazily inside the
-    handler so the module-level ``main.py`` stays import-cheap and
-    so the existing test suite (which imports ``app.main`` before
-    the cloze module) doesn't pay the OpenAI / instructor import
-    cost.
+    ``app.cloze.generate_cloze`` (standard branch) or
+    ``app.collocation.generate_collocation`` (collocation branch).
+    We import lazily inside the handler so the module-level
+    ``main.py`` stays import-cheap and so the existing test suite
+    (which imports ``app.main`` before the cloze module) doesn't
+    pay the OpenAI / instructor import cost.
 
     **Phase 6.1** — the request body is a
-    ``ClozeGenerateRequest`` with the single field
-    ``enable_rag: bool = False``. An empty body ``{}`` parses to
-    the default (``enable_rag=False``), preserving the Phase 4.5
-    wire contract verbatim — existing callers see no change. When
-    ``enable_rag=True``, the cloze generator's user prompt
-    includes ``retrieved_chunks`` (Postgres + pgvector only; on
-    SQLite the call gracefully degrades to the non-RAG prompt —
-    see ``app.cloze._retrieve_for_cloze`` for the fallback path).
+    ``ClozeGenerateRequest`` with the two fields
+    ``enable_rag: bool = False`` and
+    ``collocation: bool = False`` (Phase 7.3). An empty body ``{}``
+    parses to the defaults, preserving the Phase 4.5 / 6.1 wire
+    contract verbatim — existing callers see no change.
 
-    **Response** — the route maps the
-    ``app.cloze.ClozeExercise`` (generator contract) to the
-    ``schemas.ClozeExerciseOut`` (wire contract) by stamping the
-    Phase 6.1 shared metadata fields:
+    **Phase 7.3** — when ``collocation=True``, the route picks a
+    target word (deterministic via ``select_target_word``) and
+    calls ``generate_collocation(db, user_id, target_word_id)``.
+    The response payload carries the
+    ``CollocationExerciseOut`` shape (Phase 7.2's schema).
 
-    - ``exercise_type="cloze"`` (the discriminator)
-    - ``target_word_id`` ← ``answer_word_id`` (the cloze-specific
-      field; the two are semantically the same on cloze)
-    - ``enable_rag`` ← from the request payload
-    - ``latency_ms`` ← wall-clock end-to-end
-    - ``trace_id`` ← Langfuse span id (Phase 4.3 hook returns
-      ``None`` for now; graceful-degradation path)
+    Response (Phase 7.3) — the route returns a
+    ``ClozeGenerateResponse`` (single-class wrapper with
+    ``extra='allow'`` carrying either the standard cloze data or
+    the collocation-cloze data alongside the discriminator
+    fields):
+
+    - ``collocation`` — ``True`` on the collocation branch,
+      ``False`` on the standard branch
+    - ``partner_lemma`` — populated only on the collocation branch
+      (``None`` on the standard branch; mirrors
+      ``collocations.partner_lemma``)
+    - cloze-specific fields (``sentence_with_blank``,
+      ``distractors``, etc.) on the standard branch
+    - collocation-specific fields (``prompt``, ``partner_register``,
+      ``source_corpus``, etc.) on the collocation branch
 
     Errors:
     - 401: missing / invalid JWT (raised by ``get_current_user``).
     - 422: invalid request body (Pydantic — non-bool
-      ``enable_rag`` etc.). FastAPI's default 422 envelope.
+      ``enable_rag`` / ``collocation``, etc.). FastAPI's default
+      422 envelope.
     - 502: LLM transport / provider error or persistent schema
-      violation (``ClozeGenerationError``). The body carries the
-      structured fields so an operator can triage without re-running.
+      violation (``ClozeGenerationError`` /
+      ``CollocationGenerationError``). The body carries the
+      structured fields so an operator can triage without
+      re-running.
     - 500: corpus inconsistency (e.g. ``select_target_word`` raised
-      ``ValueError`` because the mapped ``word_type`` has zero rows).
+      ``ValueError`` because the mapped ``word_type`` has zero
+      rows, or the collocation generator found zero matching
+      rows for the picked target word).
     """
+    started = time.perf_counter()
+
+    if payload.collocation:
+        # Phase 7.3 — collocation branch.
+        #
+        # The standard cloze flow picks the target word inside
+        # ``generate_cloze`` (deterministic seed of ``(user_id, axis,
+        # date.today())``). The collocation generator requires an
+        # explicit ``target_word_id``, so we replicate the word
+        # selection here via ``select_target_word`` — same seed,
+        # same outcome as ``generate_cloze`` would have produced.
+        #
+        # Picked word is then passed to ``generate_collocation``
+        # which consumes the collocations table for that target.
+        # The collocation table is read-only at this layer (Hard
+        # rule #2 — type-level guardrail via omission).
+        from app import cloze as _cloze_mod  # lazy, has ``select_target_word``
+        from app.collocation import (
+            CollocationGenerationError,
+            generate_collocation,
+            PROMPT_TEMPLATE_VERSION as COLLOCATION_PROMPT_VERSION,
+        )
+        from app.llm import LLMError
+
+        try:
+            target_word = _cloze_mod.select_target_word(
+                db, current_user.id
+            )
+        except ValueError as exc:
+            logger.error(
+                "cloze(collocation=true): corpus inconsistency on "
+                "select_target_word for user_id=%d: %s",
+                current_user.id,
+                exc,
+            )
+            raise HTTPException(status_code=500, detail=str(exc))
+
+        try:
+            collocation_exercise = generate_collocation(
+                db, current_user.id, target_word.id
+            )
+        except LLMError as exc:
+            logger.error(
+                "cloze(collocation=true): LLM transport failure for "
+                "user_id=%d word_id=%d: %s",
+                current_user.id,
+                target_word.id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"collocation generation failed: {exc}",
+            )
+        except CollocationGenerationError as exc:
+            logger.error(
+                "cloze(collocation=true): schema dead-letter for "
+                "user_id=%d word_id=%d after %d attempt(s): %s",
+                current_user.id,
+                target_word.id,
+                exc.schema_retry_count,
+                exc.last_validation_error,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": "collocation_generation_failed",
+                    "schema_retry_count": exc.schema_retry_count,
+                    "last_validation_error": exc.last_validation_error,
+                },
+            )
+        except ValueError as exc:
+            # Corpus inconsistency on the collocation generator side
+            # (no collocation row for the picked target word). 500 —
+            # operator needs to extend the seed scripts in 7.1.
+            logger.error(
+                "cloze(collocation=true): corpus inconsistency for "
+                "user_id=%d word_id=%d: %s",
+                current_user.id,
+                target_word.id,
+                exc,
+            )
+            raise HTTPException(status_code=500, detail=str(exc))
+
+        latency_ms = int((time.perf_counter() - started) * 1000)
+
+        # Lock the prompt_template_version on the way out so a
+        # future ``generate_collocation`` that forgets to set it
+        # can't desync the contract. Map the generator's
+        # ``CollocationExercise`` to the wire-level
+        # ``CollocationExerciseOut`` with the Phase 6.1 shared
+        # metadata + the Phase 7.3 discriminator fields stamped.
+        #
+        # The wire output drops the generator-internal
+        # ``target_word_id`` (which equals the wire-level
+        # ``target_lemma``'s id — we keep the wire field name
+        # ``target_word_id`` for cross-exercise-type consumers
+        # and stamp it from the picked target word, mirroring
+        # the standard branch's behaviour on line 684).
+        collocation_payload = schemas.CollocationExerciseOut(
+            # Collocation-specific fields
+            target_lemma=target_word.word,
+            target_translation_en=(
+                (target_word.translations or "").split(",")[0].strip()
+                if getattr(target_word, "translations", None)
+                else ""
+            ),
+            prompt=collocation_exercise.prompt,
+            partner_lemma=collocation_exercise.partner_lemma,
+            partner_register=collocation_exercise.partner_register,
+            source_corpus=collocation_exercise.source_corpus,
+            rationale=collocation_exercise.rationale,
+            retrieval_chunks=[],
+            # Shared metadata (Phase 6.1)
+            exercise_type="cloze",
+            target_word_id=target_word.id,
+            prompt_template_version=COLLOCATION_PROMPT_VERSION,
+            enable_rag=False,  # collocation branch doesn't honour enable_rag
+            trace_id=None,  # Phase 4.3 hook returns None
+            latency_ms=latency_ms,
+        )
+
+        # Merge into the ``ClozeGenerateResponse`` wrapper. We
+        # serialise the inner payload via ``model_dump`` and merge
+        # with the discriminator keys so the wire is a single
+        # flat object — easier for the SPA to consume than nested
+        # under a ``payload`` key.
+        response_dict = collocation_payload.model_dump()
+        response_dict["collocation"] = True
+        response_dict["partner_lemma"] = (
+            collocation_exercise.partner_lemma
+        )
+        # ``CollocationExerciseOut`` also has a ``partner_lemma``
+        # field already; Pydantic would double-set it. Drop the
+        # duplicate (the wrapper's top-level key wins).
+        return response_dict
+
+    # ----- Phase 6.1 standard branch (collocation=False default) -----
     from app.cloze import (
         ClozeGenerationError,
         generate_cloze,
@@ -680,8 +846,8 @@ def generate_cloze_exercise(
     # ``generate_cloze`` that forgets to set it can't desync the
     # contract. Map the generator's ``ClozeExercise`` to the
     # wire-level ``ClozeExerciseOut`` with the Phase 6.1 shared
-    # fields stamped.
-    return schemas.ClozeExerciseOut(
+    # fields stamped + Phase 7.3's discriminator echoes.
+    cloze_payload = schemas.ClozeExerciseOut(
         # Generator fields
         sentence_with_blank=exercise.sentence_with_blank,
         answer_word_id=exercise.answer_word_id,
@@ -696,6 +862,16 @@ def generate_cloze_exercise(
         trace_id=None,  # Phase 4.3 hook returns None; 6.x widens to a real id
         latency_ms=latency_ms,
     )
+
+    # Phase 7.3 — wrapper-stamp the standard branch payload with
+    # the collocation=False discriminator keys. We merge with the
+    # inner payload so the SPA sees a single flat object; the new
+    # echo fields appear at the top level next to the existing
+    # cloze fields.
+    response_dict = cloze_payload.model_dump()
+    response_dict["collocation"] = False
+    response_dict["partner_lemma"] = None
+    return response_dict
 
 
 # ---------------------------------------------------------------------------
