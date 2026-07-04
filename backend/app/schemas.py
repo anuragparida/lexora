@@ -1196,3 +1196,173 @@ class PrepositionalObjectSeedRow(BaseModel):
     example_sentence: str
     frequency_score: float = Field(..., ge=0.0, le=1.0)
     source_corpus: SourceCorpus
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.2 — Collocation-cloze exercise wire shape (card t_ab77bc2b)
+#
+# Mirrors ``app.collocation.CollocationExercise`` field-for-field,
+# the same generator / wire split as Phase 4.2 / 6.2 / 6.4:
+#
+# - ``app.collocation`` owns the *generator* contract (used by the
+#   instructor-wrapped chat call).
+# - ``app.schemas`` owns the *wire* contract (used by FastAPI's
+#   ``response_model=...`` and the SPA).
+#
+# Hard rule #1 (Phase 7 plan §"Hard rules"): collocation-cloze is a
+# cloze *variant*, NOT a 4th exercise type. The discriminator
+# ``exercise_type`` stays ``Literal["cloze"]`` — the same literal
+# the regular ``ClozeExerciseOut`` narrows to. The route layer in
+# Phase 7.3 will accept a ``collocation: bool = False`` flag on
+# ``ClozeGenerateRequest``; when ``True``, the route dispatches to
+# ``generate_collocation`` and returns this ``CollocationExerciseOut``
+# shape. The base-class ``trace_id`` is the same join key Phase 5.3
+# grades use on the ``grade_logs`` row — collocation-cloze is one
+# type of cloze row, not a separate grading-log kind.
+#
+# Hard rule #2 (Pydantic v2 validated output): ``partner_register``
+# is a closed 3-way literal. Any value outside the union is a
+# Pydantic ``ValidationError`` at generation time, not a runtime
+# check downstream — the type system is the gate. ``source_corpus``
+# is similarly a closed 3-way literal (PHASE-7 gotcha #12).
+#
+# Hard rule #6 (Langfuse ``trace_id``): the base-class ``trace_id``
+# field carries the same ``grade_logs`` join key Phase 5.3 ships.
+# ``collocation: True`` is NOT a wire field — it's a discriminator
+# baked into the Langfuse span metadata (the collocation generator
+# stamps it on the trace, not on the response, so the SPA's
+# response shape stays identical to the regular cloze surface).
+# ---------------------------------------------------------------------------
+
+CollocationRegister = Literal["formal", "neutral", "colloquial"]
+CollocationSourceCorpus = Literal["dwds", "wiktionary", "manual"]
+
+
+class CollocationExerciseOut(BaseExerciseFields):
+    """Response shape for the collocation-cloze generator (Phase 7.2).
+
+    The collocation-cloze wire surface: a German sentence with a
+    single ``___`` blank (the partner_lemma goes in), the target
+    word's lemma + English translation for the SPA's header, the
+    closed 3-way register label, the closed 3-way source corpus
+    label, and an empty-by-default ``retrieval_chunks`` list for
+    forward-compatibility with a future Phase 9 RAG-on flag (not
+    wired in 7.2 — ``retrieval_chunks=[]`` is the contract today,
+    so the SPA can rely on the field's presence even when the
+    list is empty).
+
+    Field bounds (locked by ``docs/PHASE-7.md`` §"Concrete cards"
+    item 2 and the card body):
+
+    - ``target_lemma``: the German lemma of the target word.
+    - ``target_translation_en``: best-effort English gloss from
+      ``words.translations`` (may be empty when the corpus row
+      doesn't carry one — the SPA treats empty as "no gloss
+      available").
+    - ``prompt``: 1..400 chars, contains exactly one ``___``.
+    - ``partner_lemma``: 1..80 chars (a single German word /
+      short phrase).
+    - ``register``: ``Literal["formal","neutral","colloquial"]`` —
+      Pydantic rejects any other value at validation time. (The
+      wire field name is ``partner_register`` — matches the
+      storage column name; ``register`` would shadow
+      ``BaseModel.model_fields``.)
+    - ``source_corpus``: ``Literal["dwds","wiktionary","manual"]`` —
+      PHASE-7 gotcha #12, locked so a typo'd source never silently
+      passes.
+    - ``rationale``: 1..400 chars.
+    - ``retrieval_chunks``: empty list ``[]`` in 7.2 (RAG-on is a
+      Phase 9 follow-on; the field is reserved now so a future
+      wire bump doesn't need to add it).
+
+    **Discriminator lock.** ``exercise_type`` is narrowed here
+    from the base class's 3-way ``Literal["cloze","matching",
+    "comprehension"]`` down to the cloze-only branch
+    (``Literal["cloze"]``). Trying to set
+    ``exercise_type="matching"`` on a ``CollocationExerciseOut``
+    is a ``ValidationError`` — the type system is the gate
+    (Phase 7 plan §"Hard rules" #1).
+    """
+
+    # Re-declare ``exercise_type`` here so it narrows the Literal
+    # to ``"cloze"`` only. Pydantic v2 honours the narrowed
+    # annotation on the subclass.
+    exercise_type: Literal["cloze"] = Field(
+        default="cloze",
+        description=(
+            "Wire discriminator. Always ``\"cloze\"`` — "
+            "collocation-cloze is a cloze *variant*, not a new "
+            "exercise type literal (Phase 7 plan Hard rule #1)."
+        ),
+    )
+
+    target_lemma: str = Field(
+        ...,
+        description=(
+            "The German lemma of the target word (echoed from "
+            "words.word so the SPA doesn't need a second round-trip "
+            "to fetch the word row)."
+        ),
+    )
+    target_translation_en: str = Field(
+        default="",
+        description=(
+            "Best-effort English gloss of the target word, "
+            "extracted from words.translations. Empty when the "
+            "corpus row doesn't carry one — the SPA treats empty "
+            "as \"no gloss available\" rather than an error."
+        ),
+    )
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        max_length=400,
+        description=(
+            "German sentence with '___' marking the cloze position. "
+            "The LLM must embed partner_lemma verbatim."
+        ),
+    )
+    partner_lemma: str = Field(
+        ...,
+        min_length=1,
+        max_length=80,
+        description=(
+            "The collocation partner word the user has to fill in. "
+            "Mirrors collocations.partner_lemma verbatim."
+        ),
+    )
+    # ``partner_register`` on the wire (matches ``collocations.partner_register``
+    # on the storage side and ``app.collocation.CollocationExercise`` on
+    # the generator side). Avoids Pydantic's ``register``-shadows-
+    # ``BaseModel`` warning.
+    partner_register: CollocationRegister = Field(
+        ...,
+        description=(
+            "Register label of partner_lemma. Pydantic rejects "
+            "any value outside the closed Literal at validation "
+            "time — the type system is the gate (Hard rule #2)."
+        ),
+    )
+    source_corpus: CollocationSourceCorpus = Field(
+        ...,
+        description=(
+            "Provenance of the collocation row. PHASE-7 gotcha #12: "
+            "locked to the 3-value enum so a typo'd source never "
+            "silently passes."
+        ),
+    )
+    rationale: str = Field(..., min_length=1, max_length=400)
+    # Forward-compatibility shim for a Phase 9 RAG-on flag. The
+    # field is always ``[]`` in 7.2 — the route layer doesn't
+    # accept a ``enable_rag`` flag on the collocation path yet.
+    # Adding the field now means a future wire bump doesn't need
+    # to add a new key.
+    retrieval_chunks: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "Phase 9 placeholder. Always ``[]`` in Phase 7.2 — "
+            "the route layer doesn't accept a RAG-on flag on the "
+            "collocation path yet. The field is reserved now so a "
+            "future wire bump doesn't need to add a new key."
+        ),
+    )
