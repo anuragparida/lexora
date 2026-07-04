@@ -449,11 +449,11 @@ pnpm dev
 
 ## Limitations (Phase 7)
 
-Phase 7 widens the surface that Phase 6 shipped: collocations +
-prepositional-objects schema + retrieval-quality A/B landed;
-bilingual exercise opt-in (`partner_lang`); bge-m3 alternative
-is a one-env-var swap via `EMBEDDING_MODEL`. The honest
-constraints at this snapshot:
+Phase 7 (pending fold): collocations + prepositional-objects
+schema + retrieval-quality A/B; bilingual exercise opt-in
+(`partner_lang`); bge-m3 one-env-var swap via `EMBEDDING_MODEL`.
+Builds on `perseus/7-*` branches; see `docs/PHASE-7.md` for the
+spec. The honest constraints at this snapshot:
 
 - **Retrieval-quality A/B lift (Phase 7.5):** TODO: lift on
   `context_precision`, `context_recall`, `faithfulness`,
