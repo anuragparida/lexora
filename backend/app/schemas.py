@@ -425,12 +425,15 @@ class BaseExerciseFields(BaseModel):
     ...`` and inherit every field listed here.
     """
 
-    exercise_type: Literal["cloze", "matching", "comprehension"] = Field(
+    exercise_type: Literal["cloze", "matching", "comprehension", "idiom"] = Field(
         default="cloze",
         description=(
             "Wire discriminator. Phase 6.1 ships the cloze-only "
-            "branch; matching + comprehension widen this literal in "
-            "6.2 / 6.4."
+            "branch; matching + comprehension widen this literal "
+            "in 6.2 / 6.4. Phase 8.3 (card t_fa86ac58) widens "
+            "again to include 'idiom' — this widening is "
+            "additive (Phase 7 hard rule #1 — Literal widening "
+            "is wire-level; never narrow)."
         ),
     )
     target_word_id: int = Field(
@@ -806,7 +809,15 @@ class ClozeGenerateResponse(BaseModel):
 # value via a ``match`` statement (Python 3.10+). If a future card
 # widens the union (Phase 7+), the only edits are here + the
 # ``match`` arms in ``app.main`` + the matching handler functions.
-ExerciseType = Literal["cloze", "matching", "comprehension"]
+ExerciseType = Literal["cloze", "matching", "comprehension", "idiom"]
+
+
+# Phase 8.3 (card t_fa86ac58) — re-export the canonical idiom-source
+# literals (dwds / goethe / schiller) and frequency-band literal (high /
+# mid / low) so downstream modules can reference them by alias. The
+# Pydantic v2 ``Literal`` alias is the type-level gate; the schema
+# validator (``_validate_source_attribution``) enforces the
+# comma-join rule on the response.
 
 
 class GradeRequest(BaseModel):
@@ -1617,3 +1628,233 @@ class CollocationExerciseOut(BaseExerciseFields):
             "matching collocations row exists (fail-soft)."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 8.3 (card t_fa86ac58) — Idiom exercise wire surface.
+#
+# This card ships the ``IdiomExerciseOut`` response shape and the
+# ``IdiomGenerateRequest`` request body for the future
+# ``POST /exercises/idiom`` endpoint (8.4).
+#
+# Hard rules carried forward verbatim from Phase 7:
+#
+# - **Literal widening is wire-level.** The base class
+#   ``BaseExerciseFields`` widens the ``exercise_type`` literal
+#   from 3 to 4 (``cloze, matching, comprehension, idiom``). This
+#   card narrows it on the ``IdiomExerciseOut`` subclass to
+#   ``Literal["idiom"]`` — opposite direction, that's fine (the
+#   subclass narrowing is local; the base widening is what matters
+#   on the wire).
+# - **No frontend work in Phase 8.** The 8.4 wire surface is what
+#   Phase 9's study-session mixer reads.
+# - **No LLM-curated phrase generation.** Phrases are
+#   hand-curated; this module does NOT touch the
+#   ``seed_phrases_*.py`` scripts (8.1 / 8.2).
+# -----------------------------------------------------------------------------
+
+
+# Closed source-attribution literal for idioms. Comma-joined
+# subsets (e.g. ``"dwds,goethe"``) are allowed on the wire —
+# validation in the per-field ``field_validator`` below tokenises
+# the string and checks each token against the tuple.
+IdiomSourceAttribution = Literal["dwds", "goethe", "schiller"]
+IdiomFrequencyBand = Literal["high", "mid", "low"]
+
+
+class IdiomExerciseOut(BaseExerciseFields):
+    """Phase 8.3 — response shape for ``POST /exercises/idiom`` (8.4).
+
+    Inherits the shared ``BaseExerciseFields`` and adds the
+    idiom-specific fields from ``app.idiom.IdiomExercise``. Like
+    the cloze / matching / comprehension response models, the
+    ``exercise_type`` literal is narrowed on this subclass to
+    ``Literal["idiom"]`` so a `IdiomExerciseOut(exercise_type="cloze")`
+    is rejected at the Pydantic layer (the discriminator is the
+    type-level gate).
+
+    Field bounds (locked by the card body and ``IdiomExercise``):
+
+    - ``exercise_id``: server-minted uuid4 hex string. The same
+      id re-appears on the ``grade_logs`` row for the same
+      exercise (Phase 9 follow-up).
+    - ``phrase``: 5..200 chars — the German idiom verbatim.
+    - ``definition``: 1..400 chars — learner-facing gloss.
+    - ``example_usage``: 5..400 chars — illustrative German
+      sentence.
+    - ``source_attribution``: comma-joined subset of
+      ``{dwds, goethe, schiller}``.
+    - ``attested_quote`` / ``attested_source``: optional literary
+      attestations (Goethe / Schiller); both ``None`` when the
+      curated row has no attestation.
+    - ``frequency_band``: ``Literal["high","mid","low"]`` — used by
+      the cloze variant to bias high-band first.
+    - ``cloze_target``: phrase with one word blanked (``___``) for
+      the cloze-within-idiom variant; ``None`` when the curated
+      row doesn't lend itself to a within-phrase blank.
+
+    ``prompt_template_version`` mirrors the ``BaseExerciseFields``
+    contract — always equals ``idiom-v1`` for production
+    generations, the A/B key for offline eval (Phase 9 follow-up).
+    """
+
+    # Narrow the discriminator on this subclass — the local
+    # narrowing doesn't bleed through the ``BaseExerciseFields``
+    # base class (which now widens to 4 literals on the wire).
+    exercise_type: Literal["idiom"] = Field(
+        default="idiom",
+        description=(
+            "Wire discriminator. Always ``\"idiom\"`` on this "
+            "response. Phase 8.3 widens the ``BaseExerciseFields`` "
+            "literal to include ``\"idiom\"`` so an idiom endpoint "
+            "can sit alongside cloze / matching / comprehension."
+        ),
+    )
+
+    exercise_id: str = Field(
+        ...,
+        description=(
+            "Server-minted per generation id. Phase 8.3 ships a "
+            "uuid4 hex string (32 chars, no dashes). The same id "
+            "re-appears on the ``grade_logs`` row for the same "
+            "exercise (Phase 9 follow-up) so the offline A/B eval "
+            "(Phase 6.7 follow-up) is deterministic."
+        ),
+    )
+    phrase: str = Field(
+        ...,
+        min_length=5,
+        max_length=200,
+        description=(
+            "German idiom verbatim (5..200 chars). The curated "
+            "phrasal surface that the learner practises."
+        ),
+    )
+    definition: str = Field(
+        ...,
+        min_length=1,
+        max_length=400,
+        description=(
+            "Learner-facing definition (1..400 chars). Forces the "
+            "generator to compress long DWDS definitions."
+        ),
+    )
+    example_usage: str = Field(
+        ...,
+        min_length=5,
+        max_length=400,
+        description=(
+            "An illustrative German sentence using the idiom "
+            "(5..400 chars)."
+        ),
+    )
+    source_attribution: str = Field(
+        ...,
+        description=(
+            "Comma-joined subset of "
+            "``Literal['dwds','goethe','schiller']``. Validated "
+            "token-by-token by ``_validate_source_attribution``."
+        ),
+    )
+    attested_quote: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional Goethe / Schiller attestation. ``None`` "
+            "when ``source_attribution`` is ``'dwds'``-only."
+        ),
+    )
+    attested_source: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional citation for ``attested_quote`` (e.g. "
+            "'Faust I, Studierzimmer (1168-1186)'). ``None`` when "
+            "no quote is populated."
+        ),
+    )
+    frequency_band: IdiomFrequencyBand = Field(
+        ...,
+        description=(
+            "Closed-literal frequency band (high / mid / low). "
+            "Pydantic rejects any other value."
+        ),
+    )
+    cloze_target: Optional[str] = Field(
+        default=None,
+        description=(
+            "Idiom phrase with one word blanked (``___``) for the "
+            "cloze-within-idiom variant. ``None`` when the curated "
+            "row doesn't lend itself to a within-phrase blank."
+        ),
+    )
+
+    @field_validator("source_attribution")
+    @classmethod
+    def _validate_source_attribution(cls, v: str) -> str:
+        """Mirror ``app.idiom.IdiomExercise``'s literal check.
+
+        Accepts comma-joined subsets (``"dwds,goethe"``); rejects
+        any token outside the closed literal; de-dupes while
+        preserving first-appearance order.
+        """
+        if not v or not v.strip():
+            raise ValueError(
+                "source_attribution must be a non-empty "
+                "comma-joined subset of 'dwds','goethe','schiller'"
+            )
+        tokens = [t.strip() for t in v.split(",") if t.strip()]
+        if not tokens:
+            raise ValueError(
+                "source_attribution must contain at least one token"
+            )
+        valid = ("dwds", "goethe", "schiller")
+        invalid = [t for t in tokens if t not in valid]
+        if invalid:
+            raise ValueError(
+                f"source_attribution tokens {invalid!r} are outside "
+                f"the closed literal {list(valid)}"
+            )
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for t in tokens:
+            if t not in seen:
+                seen.add(t)
+                deduped.append(t)
+        return ",".join(deduped)
+
+
+class IdiomGenerateRequest(BaseModel):
+    """Request body for ``POST /exercises/idiom`` (Phase 8.4).
+
+    Phase 8.3 — ships the request shape now so the wire layer is
+    locked before 8.4 dispatches. The only field today is
+    ``enable_rag`` (default ``False``); an empty body ``{}``
+    parses to ``IdiomGenerateRequest(enable_rag=False)`` via
+    Pydantic's defaults, so a future wire addition (Phase 9
+    follow-ups) won't break existing callers.
+
+    ``enable_rag`` is a ``StrictBool`` — string ``"true"`` and
+    integer ``1`` are rejected with HTTP 422 by FastAPI's
+    Pydantic layer (Phase 7 hard rule #5 carried forward).
+
+    The 8.3 generator stub in ``app.idiom`` accepts the
+    ``enable_rag`` flag but doesn't perform a real retrieval call
+    — 8.4 wires the actual ``app.embeddings.embed_one`` +
+    ``phrases`` nearest-neighbor path on top of the 8.3
+    generation surface.
+    """
+
+    enable_rag: bool = Field(
+        default=False,
+        strict=True,
+        description=(
+            "Phase 8.4 — opt-in flag for the retrieval-augmented "
+            "idiom prompt path. When ``True``, the generator "
+            "embeds a single nearest-neighbor phrase snippet "
+            "(from the curated ``phrases`` table) in the user "
+            "prompt. When ``False`` (default), the prompt is the "
+            "curated-only shape — byte-for-byte reproducible for "
+            "A/B comparison. Phase 8.3 ships only the parameter; "
+            "8.4 wires the real retrieval call."
+        ),
+    )
+
