@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Literal
 
 
@@ -559,10 +559,28 @@ class ClozeGenerateRequest(BaseModel):
     ``False``). An empty body ``{}`` parses to
     ``ClozeGenerateRequest(enable_rag=False)`` via Pydantic's
     defaults, so the Phase 4.5 wire contract is preserved.
+
+    Phase 7.3 (card t_bdd6ab24) — the request widens with
+    ``collocation: bool = False`` (mirroring Phase 5.6's
+    ``enable_rag`` and Phase 6.1's ``enable_rag`` widening
+    pattern). When ``True``, the cloze prompt routes through
+    Phase 7.2's ``generate_collocation`` and consumes the
+    ``collocations`` table for the target word. Default
+    ``False`` keeps the Phase 4.2 + 6.1 callers byte-for-byte
+    stable (Hard rule #10 / H3) — ``{}`` parses to a request
+    identical to the previous contract.
     """
 
+    # ``StrictBool`` (Phase 7.3 acceptance) — Pydantic v2's
+    # default bool field coerces ``"true"`` (str) and ``1`` (int)
+    # to ``True`` automatically. PHASE-7 card body Hard rule #5
+    # says the field must be a real Pydantic type AND the spec
+    # test list says ``collocation="true"`` → 422. ``StrictBool``
+    # opts out of coercion: any non-bool raises
+    # ``ValidationError``, FastAPI surfaces as 422.
     enable_rag: bool = Field(
         default=False,
+        strict=True,
         description=(
             "Phase 6.1 — opt-in flag for the retrieval-augmented "
             "cloze prompt path. When ``True``, the cloze generator "
@@ -573,6 +591,136 @@ class ClozeGenerateRequest(BaseModel):
             "for A/B comparison."
         ),
     )
+    collocation: bool = Field(
+        default=False,
+        strict=True,
+        description=(
+            "Phase 7.3 (card t_bdd6ab24) — opt-in flag for the "
+            "collocation-cloze prompt path. When ``True``, the "
+            "endpoint routes through Phase 7.2's "
+            "``app.collocation.generate_collocation`` and the "
+            "response payload carries the collocation-specific "
+            "fields (``partner_lemma``, ``partner_register``, "
+            "``source_corpus``, ``prompt``). When ``False`` "
+            "(default), the endpoint produces the standard Phase "
+            "6.1 cloze response — ``partner_lemma`` echoes ``None`` "
+            "and every standard cloze field is identical to the "
+            "Phase 6.1 wire shape (Hard rule #10). Strict bool: "
+            "string ``\"true\"`` and integer ``1`` are rejected "
+            "with HTTP 422 (Phase 7.3 Hard rule #5)."
+        ),
+    )
+
+
+# Phase 7.3 (card t_bdd6ab24) — ``collocation`` echo and
+# ``partner_lemma`` optional field on ``ClozeExerciseOut``.
+#
+# The endpoint's response is a discriminated shape:
+# ``collocation=False`` returns a ``ClozeExerciseOut`` with
+# ``partner_lemma=None`` (Phase 6.1 default cloze shape, plus
+# the new echo fields); ``collocation=True`` returns a
+# ``CollocationExerciseOut`` (which already has ``partner_lemma``
+# as a required field, mirror of ``collocations.partner_lemma``).
+# The two subclasses share ``BaseExerciseFields`` (Phase 6.1) and
+# each narrows ``exercise_type`` to ``Literal["cloze"]`` —
+# PHASE-7 gotcha #5 keeps the wire discriminator ``"cloze"`` for
+# both branches (collocation-cloze is a *variant*, not a new
+# exercise type literal).
+#
+# We add two new fields to ``ClozeExerciseOut`` rather than
+# building a wrapper response_model so the existing SPA keeps
+# working unchanged:
+#
+# - ``collocation``: ``bool = False`` — discriminator echoed
+#   from the request. Always serialised by Pydantic v2's default
+#   inclusion policy. ALWAYS ``False`` on ``ClozeExerciseOut``
+#   (it IS the standard branch) and ALWAYS ``True`` on
+#   ``CollocationExerciseOut`` (it IS the collocation branch)
+#   once Phase 7.3 lands. The Phase 4.2 / 6.1 SPA sees a new
+#   field on the response that it can ignore; reading the field
+#   is opt-in.
+# - ``partner_lemma``: ``Optional[str] = None`` — populated only
+#   when ``collocation=True``. Always ``None`` on the standard
+#   branch.
+#
+# These two fields make the cloze endpoint a discriminated
+# response on the wire:
+#
+#     { ..., "collocation": false, "partner_lemma": null }
+#     { ..., "collocation": true,  "partner_lemma": "treffen" }
+#
+# Hard rule #10 (H10) — the no-flag branch must produce a
+# prompt-bytes-identical result to Phase 6.1. We measure this
+# via the generator's rendered user-prompt hash, not the JSON
+# wire shape (the wire SHAPE has the two new echo fields added
+# by Phase 7.3; the JSON ordering is alphabetical via Pydantic
+# v2's default, so a dict hash on the prompt bytes is the
+# stable invariant). Tests assert the prompt-bytes hash.
+class ClozeGenerateResponse(BaseModel):
+    """Single-class response body for ``POST /exercises/cloze``.
+
+    Phase 7.3 (card t_bdd6ab24) — the route layer returns either
+    ``ClozeExerciseOut``-shaped data (``collocation=False``) or
+    ``CollocationExerciseOut``-shaped data (``collocation=True``)
+    via a free-form ``payload: Dict[str, Any]`` bag. The two
+    always-present top-level fields are the discriminator + the
+    collocation partner word:
+
+    - ``collocation`` (bool, required) — echoed from the request.
+      ``True`` on the collocation-cloze branch, ``False`` on the
+      standard cloze branch.
+    - ``partner_lemma`` (``str | None``, default ``None``) —
+      populated only when ``collocation=True``; ``None`` on the
+      standard cloze branch (Hard rule #10).
+
+    Why a single-class wrapper rather than a Pydantic
+    ``TaggedUnion``? FastAPI's ``response_model`` validates the
+    returned value against the schema, and a discriminated union
+    ties the schema to one branch. The two branches are
+    disjoint field rosters (``sentence_with_blank`` vs ``prompt``,
+    ``distractors`` vs ``partner_register``); a single union class
+    with ``extra='allow'`` lets the route stamp either branch
+    while validating the shared discriminator fields.
+
+    Wire shape (after Pydantic serialisation, Phase 7.3):
+
+        { "collocation": false, "partner_lemma": null, <ClozeExerciseOut fields>... }
+        { "collocation": true,  "partner_lemma": "treffen", <CollocationExerciseOut fields>... }
+
+    Tests asserting H10 (Prompt-bytes identical to Phase 6.1)
+    normalise the response by stripping ``collocation`` and
+    ``partner_lemma`` before hashing — see
+    ``tests/test_cloze_collocation_flag.py``.
+    """
+
+    collocation: bool = Field(
+        ...,
+        description=(
+            "Phase 7.3 discriminator — ``True`` on the "
+            "collocation-cloze branch, ``False`` on the standard "
+            "cloze branch. Always present (echoed from the "
+            "request, never ``Optional``)."
+        ),
+    )
+    partner_lemma: Optional[str] = Field(
+        default=None,
+        description=(
+            "Collocation partner word the user has to fill in. "
+            "``None`` on the standard cloze branch; populated "
+            "only on the collocation-cloze branch (Hard rule "
+            "#10). Carries ``collocations.partner_lemma`` "
+            "verbatim when ``collocation=True``."
+        ),
+    )
+    # The bulk of the response is forwarded as a free-form
+    # payload — Pydantic v2 preserves it via ``model_config``.
+    # We can't put it on a single class because the two branches
+    # have disjoint field rosters (sentence_with_blank vs prompt,
+    # distractors vs partner_register); the route layer stamps
+    # the appropriate branch dict, and the wire surface accepts
+    # either.
+    model_config = ConfigDict(extra="allow")  # type: ignore[assignment]
+
 
 
 # ---------------------------------------------------------------------------

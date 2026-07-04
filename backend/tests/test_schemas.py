@@ -586,20 +586,32 @@ class TestClozeGenerateRequest:
 
     def test_explicit_true_round_trips(self):
         """``ClozeGenerateRequest(enable_rag=True)`` serialises
-        to ``{"enable_rag": true}`` on the wire."""
+        to ``{"enable_rag": true, "collocation": false}`` on the
+        wire. Phase 7.3 (card t_bdd6ab24) widens the request with
+        the ``collocation`` opt-in flag; the default is ``False``
+        so existing Phase 4.2 / 6.1 callers see the new field
+        appear on the wire but the field's value is the no-op
+        default (Hard rule H10).
+        """
         req = ClozeGenerateRequest(enable_rag=True)
         assert req.enable_rag is True
+        assert req.collocation is False
         # ``model_dump`` is the JSON-ready dict; ``model_dump_json``
         # is the wire string. Both should carry the flag.
-        assert req.model_dump() == {"enable_rag": True}
-        assert req.model_dump_json() == '{"enable_rag":true}'
+        assert req.model_dump() == {"enable_rag": True, "collocation": False}
+        assert req.model_dump_json() == '{"enable_rag":true,"collocation":false}'
 
     def test_explicit_false_round_trips(self):
         """``ClozeGenerateRequest(enable_rag=False)`` is also
-        accepted (default + explicit agree on the wire)."""
+        accepted (default + explicit agree on the wire). Same
+        shape change as the explicit-true case — the new
+        ``collocation`` field appears at ``False`` by default
+        (Hard rule H10, H3)."""
         req = ClozeGenerateRequest(enable_rag=False)
         assert req.enable_rag is False
-        assert req.model_dump_json() == '{"enable_rag":false}'
+        assert req.collocation is False
+        assert req.model_dump() == {"enable_rag": False, "collocation": False}
+        assert req.model_dump_json() == '{"enable_rag":false,"collocation":false}'
 
     def test_non_bool_enable_rag_is_rejected(self):
         """Non-bool ``enable_rag`` (list / dict) is a
