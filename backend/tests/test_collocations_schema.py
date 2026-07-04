@@ -178,43 +178,64 @@ def test_alembic_upgrade_head_is_idempotent_on_sqlite(
 def test_alembic_downgrade_minus_one_reverses_phase_71_ops(
     sqlite_db_path, tmp_path
 ):
-    """``alembic downgrade -1`` cleanly reverses the Phase 7.1 ops:
+    """``alembic downgrade -1`` cleanly reverses the top of the
+    chain — which is the most recently-added migration. As of
+    Phase 8.1 the top is ``8a1_phrases_table``, so ``-1`` drops
+    the ``phrases`` table.
 
-    - the ``prepositional_objects`` table is dropped
-    - the ``collocations`` table is dropped
+    The Phase 7.1 docstring originally said ``downgrade -1``
+    dropped ``prepositional_objects`` (the head at the time of
+    writing). With Phase 8.1 added, that assertion no longer
+    holds; the test pins the post-state to the expected shape
+    AFTER a target-number-of-steps downgrade to bring the
+    schema back to the Phase 7.1 boundary.
 
-    The schema lands on ``7a1_collocations_table`` (the second
-    downgrade step would also work, dropping both). A subsequent
-    ``upgrade head`` re-applies the Phase 7.1 ops cleanly.
+    Concretely:
 
-    This is the ``downgrade -1 && upgrade head`` smoke path from
-    the card acceptance list.
-    """
+    - the topmost migration (8.1 = ``phrases`` table) drops on
+      the first ``downgrade -1``.
+    - the next ``downgrade -1`` drops ``prepositional_objects``
+      (Phase 7.1 boundary).
+    - the next ``downgrade -1`` drops ``collocations`` (pre-7.1).
+
+    Each step is a clean no-op-on-the-way-down (the migration
+    files' upgrade paths short-circuit when the inspect() guard
+    sees the tables already absent)."""
     up = _run_alembic(sqlite_db_path, tmp_path, "upgrade", "head")
     assert up.returncode == 0, up.stderr
 
-    # Inspect mid-state: both Phase 7.1 tables should be present
+    # Inspect mid-state: all 3 corpus tables should be present
     # after upgrade.
     engine = create_engine(f"sqlite:///{sqlite_db_path}")
     insp_pre_down = _inspect_tables(engine)
     assert "collocations" in insp_pre_down["tables"]
     assert "prepositional_objects" in insp_pre_down["tables"]
+    assert "phrases" in insp_pre_down["tables"]
 
+    # First ``-1`` drops the head of the chain (8.1 = phrases).
     down = _run_alembic(sqlite_db_path, tmp_path, "downgrade", "-1")
     assert down.returncode == 0, down.stderr
 
-    # Inspect post-state: prepositional_objects should be gone, but
-    # collocations should still be there (because ``-1`` only drops
-    # the top of the chain — the second downgrade drops collocations).
+    # Inspect post-state: phrases should be gone, but the
+    # Phase 7.1 tables should still be there.
     insp_post = _inspect_tables(engine)
-    assert "prepositional_objects" not in insp_post["tables"]
+    assert "phrases" not in insp_post["tables"]
     assert "collocations" in insp_post["tables"]
+    assert "prepositional_objects" in insp_post["tables"]
 
-    # Second downgrade drops collocations.
+    # Second ``-1`` drops prepositional_objects.
     down2 = _run_alembic(sqlite_db_path, tmp_path, "downgrade", "-1")
     assert down2.returncode == 0, down2.stderr
     insp_after2 = _inspect_tables(engine)
-    assert "collocations" not in insp_after2["tables"]
+    assert "prepositional_objects" not in insp_after2["tables"]
+    assert "collocations" in insp_after2["tables"]
+
+    # Third ``-1`` drops collocations.
+    down3 = _run_alembic(sqlite_db_path, tmp_path, "downgrade", "-1")
+    assert down3.returncode == 0, down3.stderr
+    insp_after3 = _inspect_tables(engine)
+    assert "collocations" not in insp_after3["tables"]
+
 
     # Re-apply — must be a clean re-run. The migrations'
     # ``inspect()`` guards see fresh namespace and apply both ops
@@ -226,6 +247,7 @@ def test_alembic_downgrade_minus_one_reverses_phase_71_ops(
     )
     assert "collocations" in insp_final["tables"]
     assert "prepositional_objects" in insp_final["tables"]
+    assert "phrases" in insp_final["tables"]
     engine.dispose()
 
 
