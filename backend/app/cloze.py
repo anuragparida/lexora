@@ -78,6 +78,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app import crud, models
+from app.bilingual import PartnerLang, lookup_partner_translation
 from app.observability import get_langfuse
 from app.diagnostic.questions import ALL_AXES
 
@@ -193,6 +194,16 @@ class ClozeExercise(BaseModel):
         min_length=1,
         max_length=400,
         description="One sentence explaining the cloze design.",
+    )
+    partner_translation: str | None = Field(
+        default=None,
+        description=(
+            "Phase 7.4 — bilingual read-through. Populated from "
+            "``collocations.partner_lemma`` for the target word "
+            "when ``partner_lang='en'`` AND a collocation row "
+            "exists. ``None`` otherwise. Mirrors the wire field "
+            "on ``ClozeExerciseOut``."
+        ),
     )
     prompt_template_version: str = Field(
         ...,
@@ -722,6 +733,7 @@ def generate_cloze(
     *,
     force_word_id: int | None = None,
     enable_rag: bool = False,
+    partner_lang: PartnerLang = "de",
 ) -> ClozeExercise:
     """Generate one ``ClozeExercise`` for a logged-in user.
 
@@ -752,7 +764,12 @@ def generate_cloze(
        ``instructor`` raises ``InstructorRetryException`` after the
        budget is exhausted — we translate that into
        ``ClozeGenerationError`` with the structured fields.
-    6. Stamp ``prompt_template_version`` and the metadata contract
+    6. **Phase 7.4** — when ``partner_lang="en"``, look up
+       ``collocations.partner_lemma`` for the target word via
+       ``app.bilingual.lookup_partner_translation`` and stamp
+       ``partner_translation`` onto the result. Fail-soft: missing
+       table or row → ``partner_translation=None``.
+    7. Stamp ``prompt_template_version`` and the metadata contract
        fields onto the result; call ``_trace_cloze`` (4.3's no-op
        stub here) with the metadata dict, including the new
        ``enable_rag`` + ``retrieved_chunk_count`` fields per
@@ -775,6 +792,17 @@ def generate_cloze(
         prompt silently degrades to non-RAG). When ``False``
         (default), no retrieval call is made and the prompt is
         byte-for-byte identical to Phase 4.2.
+    partner_lang
+        Phase 7.4. ``"de"`` (default — bilingual off,
+        ``partner_translation=None``) or ``"en"`` (look up the
+        English counterpart in ``collocations``). Fail-soft
+        contract: a missing row or missing table both yield
+        ``partner_translation=None`` — the route never 500s on
+        a missing translation. Independent of 7.3's
+        ``collocation=True`` opt-in: the cloze bilingual feature
+        uses the same ``collocations.partner_lemma`` lookup but
+        doesn't require collocation-mode to be active (PHASE-7.md
+        §"What Phase 7 ships" item 2).
 
     Returns
     -------
@@ -849,6 +877,10 @@ def generate_cloze(
         # ``enable_rag`` + ``retrieved_chunk_count``.
         "enable_rag": enable_rag,
         "retrieved_chunk_count": len(retrieved_chunks),
+        # Phase 7.4 — bilingual opt-in flag, observed by
+        # ``_trace_cloze`` for A/B cohort splits on the
+        # ``partner_lang`` axis.
+        "partner_lang": partner_lang,
     }
 
     raw_client = _openai_client()
@@ -939,6 +971,17 @@ def generate_cloze(
         )
 
     latency_ms = int(_perf_counter_ms() - started)
+
+    # Phase 7.4 — bilingual read-through. When ``partner_lang="en"``,
+    # look up ``collocations.partner_lemma`` for the target word and
+    # stamp ``partner_translation`` onto the result. Fail-soft:
+    # missing table or row → ``partner_translation=None``.
+    if partner_lang == "en":
+        partner_translation = lookup_partner_translation(
+            db, result.answer_word_id, partner_lang
+        )
+        result = result.model_copy(update={"partner_translation": partner_translation})
+
     _trace_cloze(result, metadata, latency_ms)
     return result
 

@@ -586,32 +586,47 @@ class TestClozeGenerateRequest:
 
     def test_explicit_true_round_trips(self):
         """``ClozeGenerateRequest(enable_rag=True)`` serialises
-        to ``{"enable_rag": true, "collocation": false}`` on the
-        wire. Phase 7.3 (card t_bdd6ab24) widens the request with
-        the ``collocation`` opt-in flag; the default is ``False``
-        so existing Phase 4.2 / 6.1 callers see the new field
-        appear on the wire but the field's value is the no-op
-        default (Hard rule H10).
+        to ``{"enable_rag": true, "collocation": false, "partner_lang": "de"}``
+        on the wire.
+
+        Phase 7.3 (card t_bdd6ab24) widens with the ``collocation``
+        opt-in flag; default is ``False``. Phase 7.4 (card
+        t_d621bb4f) widens with ``partner_lang: Literal["de","en"]``
+        default ``"de"``. Both new fields ride along on the wire,
+        so the round-trip carries all three. Defaults preserve the
+        Phase 4.5 / 6.1 wire contract verbatim (no schema drift
+        for existing callers — they ignore the extra keys).
         """
         req = ClozeGenerateRequest(enable_rag=True)
         assert req.enable_rag is True
         assert req.collocation is False
+        assert req.partner_lang == "de"
         # ``model_dump`` is the JSON-ready dict; ``model_dump_json``
-        # is the wire string. Both should carry the flag.
-        assert req.model_dump() == {"enable_rag": True, "collocation": False}
-        assert req.model_dump_json() == '{"enable_rag":true,"collocation":false}'
+        # is the wire string. Both should carry the three flags.
+        assert req.model_dump() == {
+            "enable_rag": True,
+            "collocation": False,
+            "partner_lang": "de",
+        }
+        assert req.model_dump_json() == (
+            '{"enable_rag":true,"collocation":false,"partner_lang":"de"}'
+        )
 
     def test_explicit_false_round_trips(self):
         """``ClozeGenerateRequest(enable_rag=False)`` is also
-        accepted (default + explicit agree on the wire). Same
-        shape change as the explicit-true case — the new
-        ``collocation`` field appears at ``False`` by default
-        (Hard rule H10, H3)."""
+        accepted (default + explicit agree on the wire).
+
+        Phase 7.3 — the new ``collocation`` field appears at
+        ``False`` by default (Hard rule H10, H3). Phase 7.4 —
+        same shape: ``partner_lang`` rides along as ``"de"``.
+        """
         req = ClozeGenerateRequest(enable_rag=False)
         assert req.enable_rag is False
         assert req.collocation is False
-        assert req.model_dump() == {"enable_rag": False, "collocation": False}
-        assert req.model_dump_json() == '{"enable_rag":false,"collocation":false}'
+        assert req.partner_lang == "de"
+        assert req.model_dump_json() == (
+            '{"enable_rag":false,"collocation":false,"partner_lang":"de"}'
+        )
 
     def test_non_bool_enable_rag_is_rejected(self):
         """Non-bool ``enable_rag`` (list / dict) is a
