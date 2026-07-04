@@ -1400,8 +1400,8 @@ def generate_idiom_exercise(
     return schemas.IdiomExerciseOut.model_validate(
         {
             "exercise_id": exercise_id,
-            "target_word_id": exercise.word_id,
-            "word_id": exercise.word_id,
+            "target_word_id": payload.word_id,
+            "word_id": payload.word_id,
             "prompt_template_version": PROMPT_TEMPLATE_VERSION,
             "enable_rag": payload.enable_rag,
             "trace_id": None,

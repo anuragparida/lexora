@@ -1952,15 +1952,32 @@ class IdiomExerciseOut(BaseExerciseFields):
 
     Field bounds (locked by the card body and ``IdiomExercise``):
 
-    - ``exercise_id``: server-minted uuid4 hex string. The same
-      id re-appears on the ``grade_logs`` row for the same
-      exercise (Phase 9 follow-up).
+    - ``exercise_id``: server-minted signed 8-byte int (same
+      shape as ClozeExerciseOut / MatchingExerciseOut /
+      ComprehensionExerciseOut). The route layer stamps it via
+      ``int.from_bytes(os.urandom(8), "big", signed=True)`` —
+      matches the Phase 5.3 / 6.x convention. The same id
+      re-appears on the ``grade_logs`` row for the same exercise
+      (Phase 9 follow-up) so the offline A/B eval is
+      deterministic. Note: the *generator*-side ``IdiomExercise``
+      model (in ``app.idiom``) keeps a ``str`` exercise_id for
+      downstream grade-log join key consistency; this response
+      layer is the wire-level normalisation point.
+    - ``word_id``: FK to ``words.id`` of the target word the
+      idiom is anchored to. Echoed from the request, same
+      numerical value as ``target_word_id``. Kept as a top-level
+      field on this response (alongside ``target_word_id``) for
+      cross-exercise-type consumer symmetry — Phase 9's
+      study-session mixer reads the canonical name.
     - ``phrase``: 5..200 chars — the German idiom verbatim.
     - ``definition``: 1..400 chars — learner-facing gloss.
     - ``example_usage``: 5..400 chars — illustrative German
       sentence.
     - ``source_attribution``: comma-joined subset of
-      ``{dwds, goethe, schiller}``.
+      ``{dwds, goethe, schiller}`` — no whitespace around the
+      comma; trailing/leading separators canonicalize away
+      (``"dwds,"`` → ``"dwds"``) to mirror the Phase 8.1 seed
+      round-trip.
     - ``attested_quote`` / ``attested_source``: optional literary
       attestations (Goethe / Schiller); both ``None`` when the
       curated row has no attestation.
@@ -1988,14 +2005,41 @@ class IdiomExerciseOut(BaseExerciseFields):
         ),
     )
 
-    exercise_id: str = Field(
+    # Phase 8.4 — wire-level ``exercise_id`` is a server-minted
+    # signed 8-byte int, mirroring ``ClozeExerciseOut`` /
+    # ``MatchingExerciseOut`` / ``ComprehensionExerciseOut``. The
+    # generator-side ``IdiomExercise`` (in ``app.idiom``) keeps
+    # a ``str``-typed ``exercise_id`` for internal join keys
+    # (``grade_logs.exercise_id``); the route layer (in
+    # ``app.main``) mints the wire int and ignores the
+    # generator's ``str``.
+    exercise_id: int = Field(
         ...,
         description=(
-            "Server-minted per generation id. Phase 8.3 ships a "
-            "uuid4 hex string (32 chars, no dashes). The same id "
-            "re-appears on the ``grade_logs`` row for the same "
-            "exercise (Phase 9 follow-up) so the offline A/B eval "
-            "(Phase 6.7 follow-up) is deterministic."
+            "Server-minted per generation id (signed 8-byte "
+            "int, non-zero). Phase 5.3 / 6.x convention; same "
+            "shape as ClozeExerciseOut / MatchingExerciseOut / "
+            "ComprehensionExerciseOut. The same id re-appears "
+            "on the ``grade_logs`` row (Phase 9 follow-up) so the "
+            "offline A/B eval is deterministic."
+        ),
+    )
+    # ``word_id`` is the request-side ``word_id`` echoed on the
+    # response (FK to ``words.id``). Same numerical value as
+    # ``target_word_id``; both fields are kept for forward
+    # compatibility — ``target_word_id`` is the cross-exercise
+    # canonical name (Phase 6.1 mixin), ``word_id`` is the
+    # request-shape name (the test suite at
+    # ``tests/test_idiom_endpoint.py`` reads it directly to
+    # confirm request/response echo semantics).
+    word_id: int = Field(
+        ...,
+        description=(
+            "FK to ``words.id`` echoed from the request. Same "
+            "numerical value as ``target_word_id``. Phase 9's "
+            "study-session mixer reads ``word_id`` as the "
+            "canonical name (Phase 8.4 widens idiom to match "
+            "the cloze / matching / comprehension wire shapes)."
         ),
     )
     phrase: str = Field(
@@ -2067,18 +2111,51 @@ class IdiomExerciseOut(BaseExerciseFields):
     @field_validator("source_attribution")
     @classmethod
     def _validate_source_attribution(cls, v: str) -> str:
-        """Mirror ``app.idiom.IdiomExercise``'s literal check.
+        """Mirror ``app.idiom.IdiomExercise``'s literal check +
+        tolerate trailing/leading commas (canonicalize them away).
 
         Accepts comma-joined subsets (``"dwds,goethe"``); rejects
-        any token outside the closed literal; de-dupes while
-        preserving first-appearance order.
+        any token outside the closed literal; rejects whitespace
+        around the separator (``"dwds, goethe"``,
+        ``"dwds ,goethe"``, ``" dwds,goethe"`` — the canonical
+        wire form has zero whitespace); canonicalizes trailing
+        or leading separators (``"dwds,"`` → ``"dwds"``);
+        de-dupes while preserving first-appearance order.
+
+        Mirrors the Phase 8.1 ``_split_source_attribution`` helper
+        in this same module — the seed script round-trips
+        ``"dwds,"`` without losing data, and the wire validator
+        must do the same.
         """
         if not v or not v.strip():
             raise ValueError(
                 "source_attribution must be a non-empty "
                 "comma-joined subset of 'dwds','goethe','schiller'"
             )
-        tokens = [t.strip() for t in v.split(",") if t.strip()]
+        # Reject any leading/trailing whitespace on the whole
+        # string (" dwds,goethe", "dwds,goethe ").
+        if v != v.strip():
+            raise ValueError(
+                "source_attribution must not have leading or "
+                "trailing whitespace"
+            )
+        # Detect whitespace around a non-empty separator chunk
+        # BEFORE we strip per-token — we want "dwds, goethe" to
+        # raise (the chunk " goethe" has internal whitespace),
+        # but "dwds," to canonicalize (the trailing empty chunk
+        # is harmless). Split on ","; a chunk with internal
+        # whitespace (chunk != chunk.strip()) signals a sloppy
+        # separator.
+        chunks = v.split(",")
+        for chunk in chunks:
+            if chunk and chunk != chunk.strip():
+                raise ValueError(
+                    "source_attribution has whitespace around "
+                    "the separator — use canonical 'tok1,tok2'"
+                )
+        # Strip per-token whitespace and drop empty chunks
+        # (trailing/leading commas canonicalize away cleanly).
+        tokens = [t.strip() for t in chunks if t.strip()]
         if not tokens:
             raise ValueError(
                 "source_attribution must contain at least one token"
@@ -2090,6 +2167,8 @@ class IdiomExerciseOut(BaseExerciseFields):
                 f"source_attribution tokens {invalid!r} are outside "
                 f"the closed literal {list(valid)}"
             )
+        # De-dupe + preserve order on first appearance for a stable
+        # serializer. "dwds,dwds" → "dwds".
         seen: set[str] = set()
         deduped: list[str] = []
         for t in tokens:
@@ -2102,24 +2181,39 @@ class IdiomExerciseOut(BaseExerciseFields):
 class IdiomGenerateRequest(BaseModel):
     """Request body for ``POST /exercises/idiom`` (Phase 8.4).
 
-    Phase 8.3 — ships the request shape now so the wire layer is
-    locked before 8.4 dispatches. The only field today is
-    ``enable_rag`` (default ``False``); an empty body ``{}``
-    parses to ``IdiomGenerateRequest(enable_rag=False)`` via
-    Pydantic's defaults, so a future wire addition (Phase 9
-    follow-ups) won't break existing callers.
+    Phase 8.4 — ``word_id`` is required (Phase 8.3 shiped only
+    ``enable_rag``; 8.4 made ``word_id`` required to anchor the
+    generator against the curated ``phrases`` table. Empty
+    bodies now fail with HTTP 422 because the field is required,
+    mirroring the comprehension / cloze endpoint discipline).
 
     ``enable_rag`` is a ``StrictBool`` — string ``"true"`` and
     integer ``1`` are rejected with HTTP 422 by FastAPI's
     Pydantic layer (Phase 7 hard rule #5 carried forward).
 
-    The 8.3 generator stub in ``app.idiom`` accepts the
-    ``enable_rag`` flag but doesn't perform a real retrieval call
-    — 8.4 wires the actual ``app.embeddings.embed_one`` +
-    ``phrases`` nearest-neighbor path on top of the 8.3
-    generation surface.
+    The generator in ``app.idiom`` filters the curated
+    ``phrases`` table by ``word_id`` and raises
+    ``IdiomNotFoundError`` if no Phrase row is anchored to the
+    supplied ``word_id`` — the route layer translates this
+    into HTTP 404, not 500 (card body commitment; mirrors
+    ``GET /words/{word_id}``'s own 404 on missing ``Word``).
     """
 
+    word_id: int = Field(
+        ...,
+        gt=0,
+        description=(
+            "FK to ``words.id`` of the target word the idiom is "
+            "anchored to. Required because the curated ``phrases`` "
+            "table is per-word: every phrase row carries a "
+            "``word_id`` FK to ``words.id``. The generator "
+            "filters ``phrases WHERE word_id == :word_id`` and "
+            "raises ``IdiomNotFoundError`` if no row matches "
+            "(the route layer translates to HTTP 404). Mirrors "
+            "the ``GET /words/{word_id}`` discipline on missing "
+            "rows (404, not 500)."
+        ),
+    )
     enable_rag: bool = Field(
         default=False,
         strict=True,
@@ -2130,8 +2224,7 @@ class IdiomGenerateRequest(BaseModel):
             "(from the curated ``phrases`` table) in the user "
             "prompt. When ``False`` (default), the prompt is the "
             "curated-only shape — byte-for-byte reproducible for "
-            "A/B comparison. Phase 8.3 ships only the parameter; "
-            "8.4 wires the real retrieval call."
+            "A/B comparison."
         ),
     )
 

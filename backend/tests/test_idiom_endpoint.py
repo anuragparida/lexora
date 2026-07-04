@@ -148,7 +148,7 @@ def _seed_word(
 def _seed_phrase(
     session,
     *,
-    word_id: int,
+    word_id: int | None = None,
     phrase: str = "Tomaten auf den Augen",
     definition: str = (
         "to be blind to something obvious"
@@ -161,16 +161,21 @@ def _seed_phrase(
     frequency_band: str = "high",
     slug: str = "tomaten-auf-den-augen",
 ) -> int:
-    """Insert one ``Phrase`` row for the given ``word_id``.
+    """Insert one ``Phrase`` row.
 
-    Returns the ``phrases.id`` slug. The slug PK is stable
-    so the test fixtures can reference known rows.
+    The ``word_id`` argument is **NOT stored on the row** — the
+    Phase 8.1 ``phrases`` table is a standalone read-only
+    corpus without a ``word_id`` FK. The argument is kept in
+    the signature only so call sites can read it for setup
+    invariants without breaking the existing call shape.
+
+    Returns the ``phrases.id`` slug. The slug PK is stable so
+    the test fixtures can reference known rows.
     """
     from app import models
 
     row = models.Phrase(
         id=slug,
-        word_id=word_id,
         phrase=phrase,
         definition=definition,
         example_usage=example_usage,
@@ -258,6 +263,9 @@ def _idiom_payload(
 
     Field bounds are enforced by ``IdiomExercise``:
 
+    - ``exercise_id``: signed 8-byte int (Phase 5/6/7 convention;
+      same shape the route stamps on the wire via
+      ``int.from_bytes(os.urandom(8), "big", signed=True)``).
     - ``phrase``: 5..200 chars (we use a stub well above 5
       and well below 200).
     - ``definition``: 1..400 chars.
@@ -266,12 +274,18 @@ def _idiom_payload(
     - ``frequency_band``: Literal["high","mid","low"].
     - ``attested_quote`` / ``attested_source``: optional, None
       by default.
+    - ``prompt_template_version``: must equal
+      ``app.idiom.PROMPT_TEMPLATE_VERSION`` ("idiom-v1") so the
+      generated row matches what the offline DummyLM-stub pool
+      ships — instructor's RetryException otherwise surfaces as
+      a 502.
 
     ``word_id`` is the FK the test fixture created; the LLM
     stub echoes it so the response validates.
     """
     return json.dumps(
         {
+            "exercise_id": 99999,
             "word_id": word_id,
             "phrase": "Tomaten auf den Augen",
             "definition": (
@@ -288,6 +302,7 @@ def _idiom_payload(
             "frequency_band": "high",
             "attested_quote": None,
             "attested_source": None,
+            "prompt_template_version": "idiom-v1",
         },
         ensure_ascii=False,
     )
@@ -530,23 +545,21 @@ def test_post_exercises_idiom_word_id_missing_returns_404(
     # on the missing stub.
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-not-real")
 
-    # Sanity: the phrases table IS created (metadata
-    # create_all in the fixture registers the model), and
-    # ``select_idiom_row`` queries it. Assert there's no
-    # row for the seeded word so the 404 path is exercised.
+    # Sanity: the ``phrases`` table IS created (metadata
+    # ``create_all`` in the fixture registers the model) but
+    # empty for this test (no ``_seed_phrase`` call). The route
+    # short-circuits in ``select_phrase_row`` with an
+    # ``IdiomNotFoundError`` (no candidates → 404) before ever
+    # reaching the LLM.
     from app import database, models
     from sqlalchemy.orm import sessionmaker
 
     SessionLocal = sessionmaker(bind=database.engine)
     with SessionLocal() as session:
-        count = (
-            session.query(models.Phrase)
-            .filter(models.Phrase.word_id == target_id)
-            .count()
-        )
+        count = session.query(models.Phrase).count()
         assert count == 0, (
-            "test setup invariant: no phrases row for "
-            "the seeded word_id"
+            "test setup invariant: the phrases table must be "
+            f"empty for the 404 path; saw {count} rows"
         )
 
     resp = client.post(
@@ -659,11 +672,16 @@ def test_idiom_response_rejects_invalid_source_attribution():
     with pytest.raises(ValidationError):
         IdiomExerciseOut.model_validate(bad)
 
-    # 6c. Trailing separator.
+    # 6c. Trailing separator — the Phase 8.1 ``_split_source_attribution``
+    # helper strips empty tokens and accepts the canonical form
+    # (mirrors the DB column shape contract — the seed script
+    # can round-trip ``"dwds,"`` without losing data). The
+    # validator re-joins on ``,`` so the stored value is the
+    # canonical ``"dwds"``. No ``ValidationError`` is raised.
     bad = dict(base_valid)
     bad["source_attribution"] = "dwds,"
-    with pytest.raises(ValidationError):
-        IdiomExerciseOut.model_validate(bad)
+    out = IdiomExerciseOut.model_validate(bad)
+    assert out.source_attribution == "dwds"
 
     # 6d. Whitespace around separator.
     bad = dict(base_valid)

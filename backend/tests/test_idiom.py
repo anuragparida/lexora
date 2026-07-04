@@ -249,7 +249,7 @@ def _valid_idiom_payload(
     Used to seed the OpenAI stub for the happy-path test.
     """
     return {
-        "exercise_id": "11111111111111111111111111111111",
+        "exercise_id": 11111111,
         "phrase": phrase,
         "definition": definition,
         "example_usage": example_usage,
@@ -319,7 +319,7 @@ def test_idiom_exercise_phrase_bounds():
     """
     # Within bounds.
     ex = IdiomExercise(
-        exercise_id="a" * 32,
+        exercise_id=11111111,
         phrase="ins Blaue hinein",
         definition="planlos.",
         example_usage="Wir fahren ins Blaue hinein.",
@@ -333,7 +333,7 @@ def test_idiom_exercise_phrase_bounds():
     # Below bounds — too short.
     with pytest.raises(ValidationError):
         IdiomExercise(
-            exercise_id="a" * 32,
+            exercise_id=11111111,
             phrase="ab",  # 2 chars, < 5
             definition="x",
             example_usage="abcde",
@@ -345,7 +345,7 @@ def test_idiom_exercise_phrase_bounds():
     # Above bounds — too long.
     with pytest.raises(ValidationError):
         IdiomExercise(
-            exercise_id="a" * 32,
+            exercise_id=11111111,
             phrase="x" * 201,  # > 200 chars
             definition="x",
             example_usage="abcde",
@@ -360,7 +360,7 @@ def test_idiom_exercise_definition_bounds():
     # Below 1 char.
     with pytest.raises(ValidationError):
         IdiomExercise(
-            exercise_id="a" * 32,
+            exercise_id=11111111,
             phrase="ins Blaue hinein",
             definition="",
             example_usage="abcde",
@@ -371,7 +371,7 @@ def test_idiom_exercise_definition_bounds():
     # Above 400 chars.
     with pytest.raises(ValidationError):
         IdiomExercise(
-            exercise_id="a" * 32,
+            exercise_id=11111111,
             phrase="ins Blaue hinein",
             definition="x" * 401,
             example_usage="abcde",
@@ -385,7 +385,7 @@ def test_idiom_exercise_frequency_band_literal():
     """``frequency_band`` is a closed ``Literal["high","mid","low"]``;
     any other value raises ``ValidationError``."""
     ex_high = IdiomExercise(
-        exercise_id="a" * 32,
+        exercise_id=11111111,
         phrase="ins Blaue hinein",
         definition="planlos.",
         example_usage="Wir fahren ins Blaue hinein.",
@@ -398,7 +398,7 @@ def test_idiom_exercise_frequency_band_literal():
     # Out of literal.
     with pytest.raises(ValidationError) as exc:
         IdiomExercise(
-            exercise_id="a" * 32,
+            exercise_id=11111111,
             phrase="ins Blaue hinein",
             definition="planlos.",
             example_usage="Wir fahren ins Blaue hinein.",
@@ -420,7 +420,7 @@ def test_idiom_exercise_source_attribution_comma_joined():
     """
     # Single token — fine.
     ex = IdiomExercise(
-        exercise_id="a" * 32,
+        exercise_id=11111111,
         phrase="ins Blaue hinein",
         definition="planlos.",
         example_usage="Wir fahren ins Blaue hinein.",
@@ -432,7 +432,7 @@ def test_idiom_exercise_source_attribution_comma_joined():
 
     # Comma-joined subset — fine.
     ex2 = IdiomExercise(
-        exercise_id="a" * 32,
+        exercise_id=11111111,
         phrase="das Eis brechen",
         definition="Hemmung ueberwinden.",
         example_usage="Er versuchte das Eis zu brechen.",
@@ -444,7 +444,7 @@ def test_idiom_exercise_source_attribution_comma_joined():
 
     # De-dupe + whitespace strip.
     ex3 = IdiomExercise(
-        exercise_id="a" * 32,
+        exercise_id=11111111,
         phrase="das Eis brechen",
         definition="Hemmung ueberwinden.",
         example_usage="Er versuchte das Eis zu brechen.",
@@ -457,7 +457,7 @@ def test_idiom_exercise_source_attribution_comma_joined():
     # Out-of-literal token — rejected.
     with pytest.raises(ValidationError) as exc:
         IdiomExercise(
-            exercise_id="a" * 32,
+            exercise_id=11111111,
             phrase="ins Blaue hinein",
             definition="planlos.",
             example_usage="Wir fahren ins Blaue hinein.",
@@ -470,7 +470,7 @@ def test_idiom_exercise_source_attribution_comma_joined():
     # Empty / blank — rejected.
     with pytest.raises(ValidationError):
         IdiomExercise(
-            exercise_id="a" * 32,
+            exercise_id=11111111,
             phrase="ins Blaue hinein",
             definition="planlos.",
             example_usage="Wir fahren ins Blaue hinein.",
@@ -481,7 +481,7 @@ def test_idiom_exercise_source_attribution_comma_joined():
 
     with pytest.raises(ValidationError):
         IdiomExercise(
-            exercise_id="a" * 32,
+            exercise_id=11111111,
             phrase="ins Blaue hinein",
             definition="planlos.",
             example_usage="Wir fahren ins Blaue hinein.",
@@ -497,7 +497,7 @@ def test_idiom_exercise_cloze_target_optional():
     the ``None`` case.
     """
     ex_no_cloze = IdiomExercise(
-        exercise_id="a" * 32,
+        exercise_id=11111111,
         phrase="ins Blaue hinein",
         definition="planlos.",
         example_usage="Wir fahren ins Blaue hinein.",
@@ -523,11 +523,36 @@ def test_idiom_exercise_out_discriminator_narrows_to_idiom():
     ComprehensionExerciseOut discriminator-narrowing pattern
     (Hard rule #1 — the wire discriminator is the type-level
     gate).
+
+    Phase 8.4's wire surface adds ``word_id`` (echo from request)
+    and changes ``exercise_id`` to ``int`` to match the
+    Cloze / Matching / Comprehension convention; the underlying
+    ``IdiomExercise`` (generator-side, ``app.idiom``) keeps a
+    ``str``-typed ``exercise_id`` for ``grade_logs`` join keys,
+    and the route layer (in ``app.main``) mints the wire int.
+    So we DON'T use the shared ``_valid_idiom_payload`` helper
+    here — that helper is for the *generator-side* stub; we
+    build a wire-shape payload directly.
     """
     base_payload = {
-        **_valid_idiom_payload(),
+        # Phase 8.4 wire shape — exercise_id is a server-minted int.
+        "exercise_id": 12345,
+        # Phase 8.4 wire shape — word_id is FK-to-words.id,
+        # echoed from the request.
+        "word_id": 1,
         "target_word_id": 1,
+        "prompt_template_version": "idiom-v1",
+        "enable_rag": False,
+        "trace_id": None,
         "latency_ms": 0,
+        "phrase": "ins Blaue hinein",
+        "definition": "ohne festes Ziel, planlos (in the blue).",
+        "example_usage": "Wir fahren einfach ins Blaue hinein.",
+        "source_attribution": "dwds",
+        "attested_quote": None,
+        "attested_source": None,
+        "frequency_band": "high",
+        "cloze_target": "ins ___ hinein",
     }
     # Default discriminator value.
     out = IdiomExerciseOut.model_validate(base_payload)
@@ -665,12 +690,17 @@ def test_widening_does_not_regress_comprehension_response_shape():
 
 
 def test_idiom_generate_request_default_enable_rag_is_false():
-    """``IdiomGenerateRequest()`` defaults ``enable_rag=False`` —
-    the wire stays closed for callers that don't opt in.
+    """``IdiomGenerateRequest(word_id=...)`` defaults
+    ``enable_rag=False`` — the wire stays closed for callers
+    that don't opt in.
 
     Mirrors ``ClozeGenerateRequest``'s default contract.
+
+    Note: ``word_id`` itself is required (the route contract
+    anchors the idiom to a target word); the default-check
+    here is specifically about ``enable_rag``.
     """
-    req = IdiomGenerateRequest()
+    req = IdiomGenerateRequest(word_id=1)
     assert req.enable_rag is False
 
 
@@ -937,13 +967,14 @@ def test_select_phrase_row_is_deterministic(db_session):
     assert len(seen) >= 2
 
 
-def test_select_phrase_row_raises_when_phrases_table_is_empty(
+def test_select_phrase_row_raises_idiom_not_found_when_phrases_table_is_empty(
     tmp_path, monkeypatch
 ):
     """When no phrase rows exist (8.1 seed hasn't run yet), the
-    selector raises ``ValueError`` (corpus inconsistency).
-
-    Routes translate to 500.
+    selector raises ``IdiomNotFoundError`` — the 404 path. The
+    route layer catches it and surfaces a 404 (card body
+    mandates 404, not 500, for this case; mirrors
+    ``GET /words/{word_id}``'s 404 on missing ``Word``).
     """
     db_path = tmp_path / "test_idiom_empty.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -957,9 +988,12 @@ def test_select_phrase_row_raises_when_phrases_table_is_empty(
     engine = database.engine
     SessionLocal = sessionmaker(bind=engine)
     with SessionLocal() as session:
-        with pytest.raises(ValueError) as exc:
+        from app.idiom import IdiomNotFoundError, select_phrase_row
+
+        with pytest.raises(IdiomNotFoundError) as exc:
             select_phrase_row(session, word_id=1)
-        assert "no Phrase rows" in str(exc.value)
+        assert exc.value.word_id == 1
+        assert "no phrases row" in str(exc.value)
 
 
 def test_phrases_table_is_read_only_at_generator_layer(db_session, monkeypatch):
@@ -1017,7 +1051,7 @@ def test_optimize_idiom_module_runs_offline_on_two_row_eval_set(
             "source_attribution": "dwds",
             "frequency_band": "high",
             "exercise": IdiomExercise(
-                exercise_id="1" * 32,
+                exercise_id=12121212,
                 phrase="ins Blaue hinein",
                 definition="ohne festes Ziel.",
                 example_usage="Wir fahren ins Blaue hinein.",
@@ -1034,7 +1068,7 @@ def test_optimize_idiom_module_runs_offline_on_two_row_eval_set(
             "source_attribution": "dwds",
             "frequency_band": "mid",
             "exercise": IdiomExercise(
-                exercise_id="2" * 32,
+                exercise_id=23232323,
                 phrase="Tomaten auf den Augen",
                 definition="etwas nicht sehen.",
                 example_usage="Du hast Tomaten auf den Augen!",
@@ -1107,7 +1141,7 @@ def test_trace_idiom_silent_when_langfuse_keys_missing(monkeypatch):
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
 
     exercise = IdiomExercise(
-        exercise_id="1" * 32,
+        exercise_id=12121212,
         phrase="ins Blaue hinein",
         definition="planlos.",
         example_usage="Wir fahren ins Blaue hinein.",
@@ -1160,7 +1194,7 @@ def test_trace_idiom_emits_exercise_generate_span_with_idiom_discriminator(
     monkeypatch.setattr(idiom_live, "get_langfuse", lambda: mock_client)
 
     exercise = IdiomExercise(
-        exercise_id="1" * 32,
+        exercise_id=12121212,
         phrase="ins Blaue hinein",
         definition="planlos.",
         example_usage="Wir fahren ins Blaue hinein.",

@@ -220,13 +220,19 @@ class IdiomExercise(BaseModel):
     generations.
     """
 
-    exercise_id: str = Field(
+    exercise_id: int = Field(
         ...,
+        gt=0,
         description=(
-            "Server-minted per generation id. Phase 8.3 ships a "
-            "uuid4 hex string (32 chars, no dashes). Mirrors the "
-            "shape the future /exercises/idiom endpoint (8.4) "
-            "stamps on the wire for the grade_logs round-trip."
+            "Server-minted per generation id (signed 8-byte int, "
+            "non-zero). Phase 5.3 / 6.x convention; same shape as "
+            "``ClozeExerciseOut`` / ``MatchingExerciseOut`` / "
+            "``ComprehensionExerciseOut``. The id re-appears on the "
+            "``grade_logs`` row (Phase 9 follow-up) so the offline "
+            "A/B eval is deterministic — ``int`` ties the wire id to "
+            "the integer FK column shape end-to-end. (8.3's "
+            "uuid4-hex draft was abandoned; 8.4 aligned with the "
+            "Phase 5/6/7 int convention.)"
         ),
     )
     phrase: str = Field(
@@ -394,6 +400,34 @@ class IdiomGenerationError(RuntimeError):
         )
 
 
+class IdiomNotFoundError(LookupError):
+    """Raised by ``select_phrase_row`` when no phrase row can be served.
+
+    Triggered when the ``phrases`` table is empty (8.1 / 8.2 seeds
+    haven't run yet or weren't migrated to the live DB). The card
+    body expects ``POST /exercises/idiom`` to surface this as
+    **404**, not 500 — the request hit an unfulfillable corpus
+    constraint, not a server fault. The route layer at
+    ``backend/app/main.py`` catches this and stamps a 404.
+
+    Carries ``word_id`` so the route can surface a structured 404
+    detail (``"no phrases row exists for word_id={exc.word_id}"``)
+    that mirrors ``GET /words/{word_id}``'s own 404 shape.
+
+    Distinguishes from ``ValueError`` (which keeps the
+    race-during-iteration semantics — a row disappeared between
+    candidate list and lookup — translated to 500 by the route).
+    """
+
+    def __init__(self, *, word_id: int, candidates: int = 0) -> None:
+        self.word_id = word_id
+        self.candidates = candidates
+        super().__init__(
+            f"no phrases row for word_id={word_id} "
+            f"(candidates={candidates})"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Phrase row selection
 # ---------------------------------------------------------------------------
@@ -424,29 +458,29 @@ def select_phrase_row(db: Session, word_id: int) -> Phrase:
     Algorithm
     ---------
     1. Query all phrase rows in stable ``id`` order (slug PK).
-    2. If zero rows match, raise ``ValueError`` (the caller —
-       ``generate_idiom`` — translates to 500: corpus
-       inconsistency, no phrases seeded yet).
+    2. If zero rows match, raise ``IdiomNotFoundError`` (the
+       caller — ``generate_idiom`` / the route layer —
+       translates to 404: the request hit an unfulfillable
+       corpus constraint, not a server fault). The card body
+       demands 404 (not 500) for this case.
     3. Seed ``random.Random(str(word_id))`` and pick one slug from
        the candidate list.
 
     Raises
     ------
+    IdiomNotFoundError
+        The ``phrases`` table is empty (8.1 / 8.2 seeds haven't
+        been applied). Routes translate to 404.
     ValueError
-        No ``Phrase`` row exists in the ``phrases`` table (corpus
-        inconsistency — the seed scripts in 8.1 haven't been run
-        yet, or the migration hasn't been applied). Routes
-        translate to 500.
+        A row disappeared between candidate-list read and lookup
+        (a corpus-drift race). Routes translate to 500.
     """
     candidates: list[str] = [
         row.id
         for row in db.query(Phrase).order_by(Phrase.id).all()
     ]
     if not candidates:
-        raise ValueError(
-            f"select_phrase_row: no Phrase rows in the phrases "
-            f"table (word_id={word_id})"
-        )
+        raise IdiomNotFoundError(word_id=word_id, candidates=0)
 
     seed_str = f"phrase|{word_id}"
     rng = random.Random(seed_str)
@@ -556,7 +590,9 @@ def build_prompt(
         "exercise without edits? If no, redo before answering.\n\n"
         "OUTPUT SCHEMA (strict JSON, no prose around it):\n"
         "{\n"
-        '  "exercise_id": "<server-minted uuid4 hex, you generate a fresh one>",\n'
+        '  "exercise_id": <signed 64-bit int — server stamps on the wire, '
+        'you can leave 0 as a placeholder, the LLM is asked to echo '
+        'the value but is not required>, \n'
         '  "phrase": "<verbatim curated phrase, 5..200 chars>",\n'
         '  "definition": "<learner-facing gloss, 1..400 chars>",\n'
         '  "example_usage": "<illustrative German sentence, 5..400 chars>",\n'
@@ -646,8 +682,9 @@ def generate_idiom(
     Flow
     ----
     1. ``select_phrase_row`` picks a deterministic phrase for
-       ``word_id``. Raises ``ValueError`` when no phrase row exists
-       (corpus inconsistency — 8.1's seed hasn't run yet).
+       ``word_id``. Raises ``IdiomNotFoundError`` when the ``phrases``
+       table is empty (corpus not seeded — the route layer
+       translates to 404 per the card body, not 500).
     2. Read the user's weakness axes for the prompt.
     3. When ``enable_rag=True`` AND a ``retrieve_neighbor`` callable
        is supplied, fetch a single nearest-neighbor phrase snippet
@@ -711,10 +748,18 @@ def generate_idiom(
         Carries ``attempted_schema``, ``last_validation_error``,
         ``schema_retry_count`` so the route layer can surface a
         structured 502 instead of a bare 500.
+    IdiomNotFoundError
+        Bubbles up from ``select_phrase_row`` when the
+        ``phrases`` table is empty (8.1 / 8.2 seeds haven't run
+        yet). The route layer catches this and translates to
+        HTTP 404 (mirrors ``GET /words/{word_id}``'s 404 on
+        missing ``Word``; the card body explicitly demands 404
+        for this case, not 500).
     ValueError
-        Bubbles up from ``select_phrase_row`` when no phrase row
-        exists in the table (corpus inconsistency — 8.1 hasn't
-        seeded yet). The route layer translates this into 500.
+        Bubbles up from ``select_phrase_row`` on a corpus-
+        drift race (a phrase id disappeared between the
+        candidate list and the lookup). The route layer
+        translates this into 500.
     """
     from app.llm import _default_model, LLMError
 
@@ -986,7 +1031,7 @@ def _offline_dummy_answers() -> list[dict[str, str]]:
         {
             "exercise": json.dumps(
                 {
-                    "exercise_id": "11111111111111111111111111111111",
+                    "exercise_id": 11111111,
                     "phrase": "ins Blaue hinein",
                     "definition": "ohne festes Ziel, planlos (in the blue).",
                     "example_usage": "Wir fahren einfach ins Blaue hinein.",
@@ -1003,7 +1048,7 @@ def _offline_dummy_answers() -> list[dict[str, str]]:
         {
             "exercise": json.dumps(
                 {
-                    "exercise_id": "22222222222222222222222222222222",
+                    "exercise_id": 22222222,
                     "phrase": "Tomaten auf den Augen",
                     "definition": "offensichtliches nicht sehen (blind for what's obvious).",
                     "example_usage": "Du hast wohl Tomaten auf den Augen!",
@@ -1020,7 +1065,7 @@ def _offline_dummy_answers() -> list[dict[str, str]]:
         {
             "exercise": json.dumps(
                 {
-                    "exercise_id": "33333333333333333333333333333333",
+                    "exercise_id": 33333333,
                     "phrase": "das Eis brechen",
                     "definition": "die erste Hemmung in einer Beziehung überwinden (break the ice).",
                     "example_usage": "Er versuchte, mit einem Witz das Eis zu brechen.",
@@ -1386,6 +1431,7 @@ __all__ = [
     "IdiomExercise",
     "IdiomGenerationError",
     "IdiomModule",
+    "IdiomNotFoundError",
     "IdiomSignature",
     "Phrase",
     "_trace_idiom",
@@ -1393,4 +1439,4 @@ __all__ = [
     "generate_idiom",
     "optimize_idiom_module",
     "select_phrase_row",
-]
+]  
