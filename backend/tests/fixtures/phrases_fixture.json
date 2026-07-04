@@ -1,0 +1,47 @@
+[
+  {
+    "id": "tomaten-auf-den-augen",
+    "phrase": "Tomaten auf den Augen",
+    "definition": "blind to what is plainly obvious",
+    "example_usage": "Du hast wohl Tomaten auf den Augen — der Zug fährt um 8.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Tomaten%20auf%20den%20Augen"
+  },
+  {
+    "id": "da-steppt-der-baer",
+    "phrase": "Da steppt der Bär",
+    "definition": "that's where the action is",
+    "example_usage": "Heute Abend steppt im Stadtzentrum der Bär.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Da%20steppt%20der%20B%C3%A4r"
+  },
+  {
+    "id": "die-daumen-druecken",
+    "phrase": "die Daumen drücken",
+    "definition": "to keep one's fingers crossed",
+    "example_usage": "Ich drücke dir die Daumen fürs Examen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Daumen"
+  },
+  {
+    "id": "ins-blaue-hinein",
+    "phrase": "ins Blaue hinein",
+    "definition": "without a clear plan",
+    "example_usage": null,
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/ins%20Blaue%20hinein"
+  },
+  {
+    "id": "die-kirche-im-dorf-lassen",
+    "phrase": "die Kirche im Dorf lassen",
+    "definition": "to keep things in proportion",
+    "example_usage": "Lass mal die Kirche im Dorf!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/Kirche"
+  }
+]

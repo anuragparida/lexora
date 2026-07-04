@@ -1617,3 +1617,282 @@ class CollocationExerciseOut(BaseExerciseFields):
             "matching collocations row exists (fail-soft)."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 8.1 (card t_d967c006) — Phrases (idioms) schema
+# ---------------------------------------------------------------------------
+#
+# Wire-level shapes for the new ``phrases`` table — curated German
+# idioms (multi-word fixed expressions that are not compositional).
+# The underlying SQLAlchemy model lives in ``app.models.Phrase``;
+# these schemas are the Pydantic v2 outbound + inbound (seed-row)
+# views.
+#
+# Hard rule #2 of PHASE-8.md (``phrases`` is read-only at runtime):
+# the generator (Phase 8.3) consumes these rows; it never writes
+# back. The only write paths outside Alembic are the seed scripts.
+#
+# Hard rule #3 of PHASE-8.md (Pydantic Literal widening is
+# wire-level): this card widens ``BaseExerciseFields.exercise_type``
+# in 8.3, not here. This card only ships the data layer; the
+# exercise wire shape comes in 8.4.
+#
+# The literal enums (``frequency_band`` and the per-element
+# ``source_attribution`` tokens) are the **wire-level guardrails**
+# that prevent typos at the seed boundary (same discipline as
+# ``register`` / ``source_corpus`` on the Phase 7.1 tables — gotcha
+# #6 of PHASE-8.md). The DB columns are loose String (dialect-
+# agnostic); a raw-SQL INSERT could in principle smuggle a typo'd
+# value; this Pydantic layer closes that gap.
+# Per-element literal for ``source_attribution``. The single-element
+# literals stored in the column are one of ``"dwds"``, ``"goethe"``,
+# ``"schiller"``, ``"manual"``. A row can also carry a comma-joined
+# multi-token string like ``"dwds,goethe"``; in that case each token
+# must be in this literal (enforced by the validators on
+# ``PhraseOut`` / ``PhraseSeedRow`` below). ``"manual"`` is reserved
+# for a future hand-curated path (not in 8.1; the 8.1 seed is
+# DWDS-only).
+PhraseSourceAttribution = Literal["dwds", "goethe", "schiller", "manual"]
+
+
+# Hand-bucketed frequency band — top-100 most common idioms =
+# ``"high"``, next 100 = ``"mid"``, the rest = ``"low"``. The
+# Phase 8.4 high-band-first cloze variant queries ``frequency_band``
+# in indexed order; Phase 9 may use it for spaced-repetition-
+# style card ordering.
+PhraseFrequencyBand = Literal["high", "mid", "low"]
+
+
+def _split_source_attribution(value: str) -> list[str]:
+    """Split a comma-joined ``source_attribution`` into clean tokens.
+
+    Phase 8.1 only ever sees ``"dwds"`` (single element, the
+    initial seed is DWDS-only — Goethe/Schiller lands in 8.2). The
+    validators below tolerate multi-element strings like
+    ``"dwds,goethe"`` so 8.2's seed can add attestation without
+    changing the wire contract. Empty tokens (from a trailing
+    comma) are stripped; whitespace is trimmed per element.
+    """
+    return [tok.strip() for tok in value.split(",") if tok.strip()]
+
+
+# Set of allowed source tokens — built once at module import so the
+# ``PhraseOut`` / ``PhraseSeedRow`` validators do a cheap ``in``
+# check instead of re-walking ``Literal``. Mirrors the
+# ``register_label`` discipline on ``CollocationOut``.
+_PHRASE_SOURCE_TOKENS = frozenset(
+    {"dwds", "goethe", "schiller", "manual"}
+)
+
+
+class PhraseOut(BaseModel):
+    """Phase 8.1 — outbound view of a single ``phrases`` row.
+
+    Wire-level fields mirror the SQLAlchemy model column-for-column.
+    The ``created_at`` field is exposed because the Phase 9 audit
+    surface (not in this card) may want to filter by insertion
+    batch — same shape as ``CollocationOut`` for consistency.
+
+    ``source_attribution`` is the comma-joined string shape from the
+    DB. The wire field carries a comma-joined string validated
+    per-token at parse time (each token must be in
+    ``PhraseSourceAttribution``). Storing the joined string on the
+    wire (vs. a list-of-tokens) keeps the JSON serializer simple
+    and matches the DB column 1:1 — the validator normalises
+    whitespace too (``"dwds , goethe"`` → ``"dwds,goethe"``).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    phrase: str
+    definition: str
+    example_usage: Optional[str] = None
+    source_attribution: str
+    frequency_band: PhraseFrequencyBand
+    dwds_url: Optional[str] = None
+    attested_quote: Optional[str] = None
+    attested_source: Optional[str] = None
+    created_at: datetime
+
+    @field_validator("source_attribution")
+    @classmethod
+    def _check_source_tokens(cls, v: str) -> str:
+        # Comma-joined literal — split, trim, verify each token is
+        # in the allow-list. Empty string is rejected (the column
+        # is non-null and the corpus always has at least one
+        # source).
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError(
+                "source_attribution must be a non-empty string"
+            )
+        tokens = _split_source_attribution(v)
+        unknown = [t for t in tokens if t not in _PHRASE_SOURCE_TOKENS]
+        if unknown:
+            raise ValueError(
+                f"source_attribution tokens {unknown!r} not in "
+                f"{sorted(_PHRASE_SOURCE_TOKENS)!r}"
+            )
+        return ",".join(tokens)  # normalise whitespace
+
+
+class PhraseSeedRow(BaseModel):
+    """Phase 8.1 — inbound shape for a single DWDS seed-file row.
+
+    Used by ``backend/scripts/seed_phrases_dwds.py`` to validate
+    each JSON-Lines entry before INSERT. Deliberately omits
+    ``created_at`` (server-side default).
+
+    Card body contract (PHASE-8.md §"What 8.1 ships" item 4):
+
+    - ``id``: slugified ``<Lemma>`` (5-120 chars — the slugified
+      form is typically much shorter than the 200-char phrase
+      surface; the wider 120-char cap tolerates German compounds
+      like ``"über-die-Verhältnisse-leben"``).
+    - ``phrase``: 5–200 chars (UNIQUE in the DB).
+    - ``definition``: 1–400 chars (the Pydantic cap forces the seed
+      author to compress long DWDS definitions).
+    - ``example_usage``: optional, 5–400 chars. ``None`` when DWDS's
+      ``<Example>`` is absent.
+    - ``source_attribution``: a single literal token (e.g. ``"dwds"``).
+      Comma-joined multi-token strings (``"dwds,goethe"``) are
+      accepted by the validator too — that's the Phase 8.2
+      attestation seed shape, kept on the wire contract here so
+      8.2 doesn't have to re-broaden the model.
+    - ``frequency_band``: ``"high" / "mid" / "low"`` (hand-bucketed
+      by the seed author).
+    - ``dwds_url``: optional source DWDS URL.
+
+    The literal enums are the wire-level guardrails (gotcha #6
+    of PHASE-8.md): a typo'd ``frequency_band`` or misspelled
+    ``source_attribution`` token is caught HERE, at the seed
+    boundary, not when the row silently propagates into the
+    Phase 8.3 idiom generator.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str = Field(
+        ...,
+        min_length=3,
+        max_length=120,
+        description=(
+            "Slug PK — ``<Lemma>`` slugified (lowercase, "
+            "whitespace → hyphens, umlauts kept as-is so the slug "
+            "is still readable)."
+        ),
+    )
+    phrase: str = Field(
+        ...,
+        min_length=5,
+        max_length=200,
+        description=(
+            "German surface form of the idiom (UNIQUE in the DB)."
+        ),
+    )
+    definition: str = Field(
+        ...,
+        min_length=1,
+        max_length=400,
+        description=(
+            "Learner-friendly English gloss. Pydantic-capped so "
+            "the seed author compresses long DWDS definitions into "
+            "a single tight sentence."
+        ),
+    )
+    example_usage: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional German usage example. ``None`` when DWDS's "
+            "<Example> child is absent (some lemmas don't have one)."
+        ),
+    )
+
+    @field_validator("example_usage")
+    @classmethod
+    def _check_example_length(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        if len(v) < 5 or len(v) > 400:
+            raise ValueError(
+                "example_usage must be 5–400 chars when set "
+                f"(got len={len(v)})"
+            )
+        return v
+
+    # Comma-joined literal as a free-form string at the type level
+    # (the standard ``Literal`` only allows a flat union). The
+    # validator below enforces per-token membership in
+    # ``_PHRASE_SOURCE_TOKENS``. This matches the DB column shape
+    # exactly and keeps the JSON wire a single string (not an
+    # array).
+    source_attribution: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description=(
+            "Comma-joined literal. 8.1 only sees ``\"dwds\"``; the "
+            "validator accepts ``\"dwds,goethe\"`` shapes so 8.2's "
+            "attestation seed doesn't have to widen this Pydantic "
+            "model again. Each comma-separated token must be in "
+            "``{dwds, goethe, schiller, manual}``."
+        ),
+    )
+
+    @field_validator("source_attribution")
+    @classmethod
+    def _check_source_attribution_tokens(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("source_attribution must be non-empty")
+        tokens = _split_source_attribution(v)
+        if not tokens:
+            raise ValueError(
+                "source_attribution must contain at least one token "
+                "after split"
+            )
+        unknown = [t for t in tokens if t not in _PHRASE_SOURCE_TOKENS]
+        if unknown:
+            raise ValueError(
+                f"source_attribution tokens {unknown!r} not in "
+                f"{sorted(_PHRASE_SOURCE_TOKENS)!r}"
+            )
+        return ",".join(tokens)
+
+    frequency_band: PhraseFrequencyBand = Field(
+        ...,
+        description=(
+            "Hand-bucketed band — top-100 most common = high, "
+            "next 100 = mid, the rest = low. The Phase 8.4 "
+            "high-band-first cloze variant queries this column "
+            "in indexed order."
+        ),
+    )
+    dwds_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "Source DWDS Idiome URL. ``None`` when the row was "
+            "not sourced from DWDS (the Phase 8.2 Goethe / "
+            "Schiller attestation rows would set this to NULL)."
+        ),
+    )
+    # Reserved for Phase 8.2 — the Goethe / Schiller attestation
+    # extension reuses this Pydantic shape with these fields
+    # populated. Nullable + optional here so the 8.1 DWDS seed
+    # doesn't have to set them.
+    attested_quote: Optional[str] = Field(
+        default=None,
+        max_length=400,
+        description=(
+            "Phase 8.2 — Goethe / Schiller quotation. Always "
+            "``None`` in the 8.1 DWDS seed."
+        ),
+    )
+    attested_source: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "Phase 8.2 — citation (e.g. ``\"Faust I, Studierzimmer "
+            "(1168-1186)\"``). Always ``None`` in the 8.1 DWDS seed."
+        ),
+    )

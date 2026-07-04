@@ -465,3 +465,115 @@ class PrepositionalObject(Base):
         default=datetime.utcnow,
         server_default=sa.func.now(),
     )
+
+
+class Phrase(Base):
+    """Phase 8.1 (card t_d967c006) — curated German idioms.
+
+    A *phrase* here is a fixed multi-word expression that is NOT
+    compositional: *ins Blaue hinein* (literally "into the blue in",
+    meaning "without a clear plan"), *Tomaten auf den Augen*
+    ("tomatoes on the eyes", meaning "blind to what's obvious").
+    These are the building blocks of the ``app.idiom`` exercise
+    generator (Phase 8.3) and the ``/exercises/idiom`` endpoint
+    (Phase 8.4); Phase 9 may also feed the study-session mixer.
+
+    The table is **read-only at runtime** (Hard rule #2 of
+    PHASE-8.md). The generator (Phase 8.3) consumes it; it never
+    writes back. The only write paths outside Alembic are the seed
+    scripts (``backend/scripts/seed_phrases_dwds.py`` for the DWDS
+    Idiome subset and ``backend/scripts/seed_phrases_attestations.py``
+    for Goethe/Schiller, both in 8.2).
+
+    Columns mirror the card body exactly (the Pydantic shape lives
+    in ``app.schemas.Phrase``):
+
+    - ``id`` — slug PK (NOT autoincrement). The seed script
+      slugifies the DWDS ``Lemma`` (e.g. ``"ins Blaue hinein"`` →
+      ``"ins-blaue-hinein"``). Slug-PK gives the FK reference for
+      Phase 9 attribution a stable handle and lets the seed script
+      INSERT OR IGNORE cleanly (idempotent on re-run).
+    - ``phrase`` — the German surface form (5–200 chars). Pydantic
+      bounds enforced at the wire layer; DB column is loose Text
+      (the generator reads, never validates, so the column is
+      pragmatic). UNIQUE — the same idiom can't appear twice in
+      different bands.
+    - ``definition`` — a learner-friendly English gloss (1–400
+      chars). The Pydantic cap forces the seed script to compress
+      DWDS's verbose multi-sentence definitions into a single
+      tight sentence.
+    - ``example_usage`` — optional German usage example (5–400
+      chars). Some DWDS ``<Lemma>`` entries have no ``<Example>``
+      child; the seed script tolerates the omission (NULL).
+    - ``source_attribution`` — comma-joined literal of
+      ``"dwds" / "goethe" / "schiller"``. The same idiom can land
+      in both DWDS and a Goethe attestation; in that case the
+      column carries ``"dwds,goethe"``. The DB column is loose
+      String; the wire layer (and the seed-row validator) enforce
+      the literal at the application boundary (PHASE-8.md
+      gotcha #6 — same discipline as ``register`` / ``source_corpus``
+      on Phase 7.1's tables). Indexed for Phase 9 attribution
+      queries.
+    - ``frequency_band`` — ``"high"`` / ``"mid"`` / ``"low"`` —
+      hand-bucketed by the seed author. Top-100 most common =
+      ``"high"``, next 100 = ``"mid"``, the rest = ``"low"``.
+      Same loose-String-on-the-DB / Literal-at-the-wire-layer
+      pattern. Indexed for the high-band-first cloze variant
+      in Phase 8.4.
+    - ``dwds_url`` — the source DWDS Idiome URL for the lemma
+      (``NULL`` when the row was not sourced from DWDS).
+    - ``attested_quote`` — optional Phase 8.2 attestation
+      (Goethe/Schiller quotation). DB column is loose TEXT;
+      the column is reserved here so 8.2 doesn't need an
+      Alembic rewrite (it's an additive seed-step.
+    - ``attested_source`` — optional Phase 8.2 source citation
+      ("Faust I, Studierzimmer (1168-1186)"). Same dialect-agnostic
+      pattern; LOOSE TEXT, Pydantic-bounded at the wire layer.
+    - ``created_at`` — DB-side default to ``sa.func.now()`` so raw-
+      SQL inserts (``psql -c "INSERT ..."``) get a sane value.
+
+    Two indexes ship in the migration: ``ix_phrases_source_attribution``
+    (Phase 9 attribution queries) and ``ix_phrases_frequency_band``
+    (Phase 8.4 high-band-first cloze variant). The PK itself is an
+    implicit index on ``id``.
+    """
+
+    __tablename__ = "phrases"
+
+    # The DWDS ``<Lemma>`` slugified — e.g. ``"Tomaten auf den
+    # Augen"`` → ``"tomaten-auf-den-augen"``. Used as the PK so the
+    # idempotent seed (``ON CONFLICT (id) DO NOTHING`` /
+    # INSERT-OR-IGNORE) can re-run cleanly. Slug is 80-char-capped
+    # at the seed boundary (long lemmas are trimmed); the column
+    # itself is String (no DB-side cap) because the corpus is
+    # hand-curated and the bound lives at the application layer.
+    id = Column(String(120), primary_key=True, index=True)
+    phrase = Column(Text, nullable=False, unique=True)
+    definition = Column(Text, nullable=False)
+    # ``example_usage`` is the only nullable text column besides
+    # the attestation fields — DWDS occasionally ships an idiom
+    # without an example, and the schema must tolerate that.
+    example_usage = Column(Text, nullable=True)
+    # Comma-joined literal — e.g. ``"dwds"``, ``"dwds,goethe"``,
+    # ``"goethe,schiller"``. Loose String on the DB; the wire layer
+    # enforces the per-element literal at parse time. Indexed for
+    # Phase 9 attribution queries.
+    source_attribution = Column(String, nullable=False, index=True)
+    # ``"high" / "mid" / "low"`` — hand-bucketed. Indexed for the
+    # Phase 8.4 high-band-first cloze variant. Same dialect-agnostic
+    # loose-String / Literal-at-the-wire-layer pattern as
+    # ``register`` / ``source_corpus`` on the Phase 7.1 tables.
+    frequency_band = Column(String, nullable=False, index=True)
+    dwds_url = Column(Text, nullable=True)
+    # Phase 8.2 attestation columns — reserved here (additive,
+    # nullable) so the Goethe/Schiller seed script doesn't need an
+    # Alembic rewrite. 8.2 lands as a SECOND seed-script PR, NOT a
+    # schema migration; the columns are present from 8.1 onward.
+    attested_quote = Column(Text, nullable=True)
+    attested_source = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=sa.func.now(),
+    )

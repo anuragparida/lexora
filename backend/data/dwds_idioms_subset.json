@@ -1,0 +1,1406 @@
+[
+  {
+    "id": "ins-blaue-hinein",
+    "phrase": "ins Blaue hinein",
+    "definition": "without a clear plan or destination; aimlessly",
+    "example_usage": "Wir sind einfach ins Blaue hinein gefahren.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/ins%20Blaue%20hinein"
+  },
+  {
+    "id": "tomaten-auf-den-augen",
+    "phrase": "Tomaten auf den Augen",
+    "definition": "blind to what is plainly obvious",
+    "example_usage": "Du hast wohl Tomaten auf den Augen — der Zug fährt um 8.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Tomaten%20auf%20den%20Augen"
+  },
+  {
+    "id": "ins-faeustchen-lachen",
+    "phrase": "ins Fäustchen lachen",
+    "definition": "to laugh up one's sleeve; gloat secretly",
+    "example_usage": "Sie lachte ins Fäustchen, als er die Prüfung verpasste.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/ins%20F%C3%A4ustchen%20lachen"
+  },
+  {
+    "id": "da-steppt-der-baer",
+    "phrase": "Da steppt der Bär",
+    "definition": "that's where the action is; the place is jumping",
+    "example_usage": "Heute Abend steppt im Stadtzentrum der Bär.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Da%20steppt%20der%20B%C3%A4r"
+  },
+  {
+    "id": "ich-verstehe-nur-bahnhof",
+    "phrase": "Ich verstehe nur Bahnhof",
+    "definition": "I don't understand a thing; completely lost",
+    "example_usage": "Bei diesem Vortrag verstehe ich nur Bahnhof.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Bahnhof"
+  },
+  {
+    "id": "das-ist-nicht-mein-bier",
+    "phrase": "Das ist nicht mein Bier",
+    "definition": "that's not my problem",
+    "example_usage": "Was er macht, ist nicht mein Bier.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Bier"
+  },
+  {
+    "id": "die-daumen-druecken",
+    "phrase": "die Daumen drücken",
+    "definition": "to keep one's fingers crossed (wish luck)",
+    "example_usage": "Ich drücke dir die Daumen für Examen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Daumen"
+  },
+  {
+    "id": "den-nagel-auf-den-kopf-treffen",
+    "phrase": "den Nagel auf den Kopf treffen",
+    "definition": "to hit the nail on the head",
+    "example_usage": "Mit dieser Analyse hast du den Nagel auf den Kopf getroffen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Nagel"
+  },
+  {
+    "id": "eine-extrawurst-verlangen",
+    "phrase": "eine Extrawurst verlangen",
+    "definition": "to demand special treatment",
+    "example_usage": "Er will immer eine Extrawurst.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Extrawurst"
+  },
+  {
+    "id": "zwei-fliegen-mit-einer-klappe-schlagen",
+    "phrase": "zwei Fliegen mit einer Klappe schlagen",
+    "definition": "to kill two birds with one stone",
+    "example_usage": "Mit der Radtour verbinden wir Sport und Ausflug.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Klappe"
+  },
+  {
+    "id": "auf-dem-holzweg-sein",
+    "phrase": "auf dem Holzweg sein",
+    "definition": "to be on the wrong track",
+    "example_usage": "Mit dieser Vermutung bist du auf dem Holzweg.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Holzweg"
+  },
+  {
+    "id": "die-kirche-im-dorf-lassen",
+    "phrase": "die Kirche im Dorf lassen",
+    "definition": "to keep things in proportion; not lose perspective",
+    "example_usage": "Jetzt mal die Kirche im Dorf lassen!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Kirche"
+  },
+  {
+    "id": "das-ist-ein-katzensprung",
+    "phrase": "das ist ein Katzensprung",
+    "definition": "it's just a stone's throw away",
+    "example_usage": "Bis zur Arbeit ist es nur ein Katzensprung.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Katzensprung"
+  },
+  {
+    "id": "da-liegt-der-hund-begraben",
+    "phrase": "Da liegt der Hund begraben",
+    "definition": "that's the crux of the matter",
+    "example_usage": "Da liegt der Hund begraben — der Vertrag wurde nie unterschrieben.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Hund"
+  },
+  {
+    "id": "eine-lanze-fuer-etwas-brechen",
+    "phrase": "eine Lanze für etwas brechen",
+    "definition": "to champion a cause; stick up for something",
+    "example_usage": "Sie bricht eine Lanze für erneuerbare Energien.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Lanze"
+  },
+  {
+    "id": "hummeln-im-hintern-haben",
+    "phrase": "Hummeln im Hintern haben",
+    "definition": "ants in one's pants; very restless",
+    "example_usage": "Er hat heute richtig Hummeln im Hintern.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Hummel"
+  },
+  {
+    "id": "die-schaefchen-ins-trockene-bringen",
+    "phrase": "die Schäfchen ins Trockene bringen",
+    "definition": "to secure one's wealth; bring one's affairs to safety",
+    "example_usage": "Nach 30 Jahren hat er seine Schäfchen ins Trockene gebracht.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Sch%C3%A4fchen"
+  },
+  {
+    "id": "da-liegt-der-hase-im-pfeffer",
+    "phrase": "Da liegt der Hase im Pfeffer",
+    "definition": "that's where the trouble lies",
+    "example_usage": "Da liegt der Hase im Pfeffer — der Akku ist leer.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Hase"
+  },
+  {
+    "id": "den-inneren-schweinehund-ueberwinden",
+    "phrase": "den inneren Schweinehund überwinden",
+    "definition": "to overcome one's inner sloth",
+    "example_usage": "Jeden Morgen muss ich meinen inneren Schweinehund überwinden.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Schweinehund"
+  },
+  {
+    "id": "die-nase-voll-haben",
+    "phrase": "die Nase voll haben",
+    "definition": "to be fed up with something",
+    "example_usage": "Ich habe die Nase voll von deinen Ausreden.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Nase"
+  },
+  {
+    "id": "aus-dem-haeuschen-sein",
+    "phrase": "aus dem Häuschen sein",
+    "definition": "to be over the moon; very excited",
+    "example_usage": "Sie war aus dem Häuschen, als sie die Note sah.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/H%C3%A4uschen"
+  },
+  {
+    "id": "ins-fettnaepfchen-treten",
+    "phrase": "ins Fettnäpfchen treten",
+    "definition": "to put one's foot in it; commit a faux pas",
+    "example_usage": "Er trat im Meeting wieder ins Fettnäpfchen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Fettn%C3%A4pfchen"
+  },
+  {
+    "id": "die-welt-ist-ein-dorf",
+    "phrase": "die Welt ist ein Dorf",
+    "definition": "it's a small world",
+    "example_usage": "Auf dem Festival traf ich meinen Mathelehrer — die Welt ist ein Dorf.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Dorf"
+  },
+  {
+    "id": "um-den-heissen-brei-herumreden",
+    "phrase": "um den heißen Brei herumreden",
+    "definition": "to beat around the bush",
+    "example_usage": "Hör auf, um den heißen Brei herumzureden.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Brei"
+  },
+  {
+    "id": "schwein-haben",
+    "phrase": "Schwein haben",
+    "definition": "to be lucky",
+    "example_usage": "Du hast Schwein, dass du den Zug noch erreicht hast.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Schwein"
+  },
+  {
+    "id": "da-haben-wirs",
+    "phrase": "Da haben wir's",
+    "definition": "there you have it; just as suspected",
+    "example_usage": "Da haben wir's — der Drucker ist wieder kaputt.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/da%20haben%20wir%27s"
+  },
+  {
+    "id": "hand-und-fuss-haben",
+    "phrase": "Hand und Fuß haben",
+    "definition": "to be well thought-out; hold water",
+    "example_usage": "Sein Konzept hat Hand und Fuß.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Hand"
+  },
+  {
+    "id": "jetzt-mal-halblang",
+    "phrase": "Jetzt mal halblang",
+    "definition": "hold your horses; calm down",
+    "example_usage": "Jetzt mal halblang — so schlimm ist das auch wieder nicht.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/halblang"
+  },
+  {
+    "id": "butter-bei-die-fische",
+    "phrase": "Butter bei die Fische",
+    "definition": "now let's get down to business",
+    "example_usage": "Butter bei die Fische — was kostet das?",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Fisch"
+  },
+  {
+    "id": "ins-kalte-wasser-springen",
+    "phrase": "ins kalte Wasser springen",
+    "definition": "to jump in at the deep end",
+    "example_usage": "Beim neuen Job muss er ins kalte Wasser springen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Wasser"
+  },
+  {
+    "id": "seinen-senf-dazugeben",
+    "phrase": "seinen Senf dazugeben",
+    "definition": "to add one's two cents (often unwanted)",
+    "example_usage": "Zu jedem Thema muss er seinen Senf dazugeben.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Senf"
+  },
+  {
+    "id": "mir-faellt-ein-stein-vom-herzen",
+    "phrase": "Mir fällt ein Stein vom Herzen",
+    "definition": "a weight off my mind (great relief)",
+    "example_usage": "Dir ist hoffentlich ein Stein vom Herzen gefallen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Stein"
+  },
+  {
+    "id": "die-aermel-hochkrempeln",
+    "phrase": "die Ärmel hochkrempeln",
+    "definition": "to roll up one's sleeves; get to work",
+    "example_usage": "Es gibt viel zu tun — Ärmel hochkrempeln!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/%C3%84rmel"
+  },
+  {
+    "id": "die-suppe-versalzen",
+    "phrase": "die Suppe versalzen",
+    "definition": "to spoil it (literally: oversalt the soup)",
+    "example_usage": "Mit seiner Bemerkung hat er die ganze Suppe versalzen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Suppe"
+  },
+  {
+    "id": "einen-kater-haben",
+    "phrase": "einen Kater haben",
+    "definition": "to have a hangover",
+    "example_usage": "Nach der Feier hatte er einen mächtigen Kater.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Kater"
+  },
+  {
+    "id": "da-haben-wir-den-salat",
+    "phrase": "Da haben wir den Salat",
+    "definition": "and there you have it (a mess)",
+    "example_usage": "Da haben wir den Salat — alle Daten weg.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Salat"
+  },
+  {
+    "id": "wer-a-sagt-muss-auch-b-sagen",
+    "phrase": "Wer A sagt, muss auch B sagen",
+    "definition": "in for a penny, in for a pound",
+    "example_usage": "Wer A sagt, muss auch B sagen — also los!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/A"
+  },
+  {
+    "id": "wer-rastet-der-rostet",
+    "phrase": "Wer rastet, der rostet",
+    "definition": "use it or lose it; he who rests, rusts",
+    "example_usage": "Wer rastet, der rostet — geh weiter joggen!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/rosten"
+  },
+  {
+    "id": "das-grosse-los-ziehen",
+    "phrase": "das große Los ziehen",
+    "definition": "to hit the jackpot",
+    "example_usage": "Mit seinem neuen Job hat er das große Los gezogen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Los"
+  },
+  {
+    "id": "das-a-und-o",
+    "phrase": "das A und O",
+    "definition": "the be-all and end-all; the essence",
+    "example_usage": "Disziplin ist das A und O beim Lernen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/A"
+  },
+  {
+    "id": "auf-den-punkt-kommen",
+    "phrase": "auf den Punkt kommen",
+    "definition": "to get to the point",
+    "example_usage": "Bitte komm auf den Punkt.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Punkt"
+  },
+  {
+    "id": "pferde-schubsen",
+    "phrase": "Pferde schubsen",
+    "definition": "to push a stalled project forward",
+    "example_usage": "Wir müssen das Projekt mal wieder schubsen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Pferd"
+  },
+  {
+    "id": "da-liegen-welten-dazwischen",
+    "phrase": "Da liegen Welten dazwischen",
+    "definition": "there's a long way to go; worlds apart",
+    "example_usage": "Bis zum Frieden liegen noch Welten dazwischen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Welt"
+  },
+  {
+    "id": "da-kann-man-machen-was-man-will",
+    "phrase": "Da kann man machen was man will",
+    "definition": "whatever you do, it doesn't help",
+    "example_usage": "Da kann man machen was man will — der Computer stürzt trotzdem ab.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/was%20man%20will"
+  },
+  {
+    "id": "den-inneren-schweinehund-besiegen",
+    "phrase": "den inneren Schweinehund besiegen",
+    "definition": "to defeat one's inner sloth",
+    "example_usage": "Er hat seinen inneren Schweinehund besiegt und ist joggen gegangen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Schweinehund"
+  },
+  {
+    "id": "die-extrawurst-verlangen",
+    "phrase": "die Extrawurst verlangen",
+    "definition": "to demand special treatment",
+    "example_usage": "Immer will er die Extrawurst verlangen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Extrawurst"
+  },
+  {
+    "id": "eine-extrawurst-verlangt-bekommen",
+    "phrase": "eine Extrawurst verlangt bekommen",
+    "definition": "to be given special treatment",
+    "example_usage": "Er hat eine Extrawurst verlangt bekommen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Extrawurst"
+  },
+  {
+    "id": "tomaten-auf-den-augen-haben",
+    "phrase": "Tomaten auf den Augen haben",
+    "definition": "to be blind to the obvious",
+    "example_usage": "Du hast wohl Tomaten auf den Augen — die Ampel ist rot.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Tomate"
+  },
+  {
+    "id": "ein-sturm-im-wasserglas",
+    "phrase": "ein Sturm im Wasserglas",
+    "definition": "a storm in a teacup",
+    "example_usage": "Die Aufregung war ein Sturm im Wasserglas.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Sturm"
+  },
+  {
+    "id": "die-katze-im-sack-kaufen",
+    "phrase": "die Katze im Sack kaufen",
+    "definition": "to buy a pig in a poke",
+    "example_usage": "Kauf die Katze nicht im Sack — prüfe das Auto vorher.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Katze"
+  },
+  {
+    "id": "wie-gegen-eine-wand-reden",
+    "phrase": "wie gegen eine Wand reden",
+    "definition": "to talk to a wall",
+    "example_usage": "Es ist wie gegen eine Wand zu reden.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Wand"
+  },
+  {
+    "id": "milchmaedchenrechnung",
+    "phrase": "Milchmädchenrechnung",
+    "definition": "an overly optimistic calculation (naive sum)",
+    "example_usage": "Seine Annahme war eine Milchmädchenrechnung.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Milchm%C3%A4dchenrechnung"
+  },
+  {
+    "id": "mit-dem-kopf-durch-die-wand",
+    "phrase": "mit dem Kopf durch die Wand",
+    "definition": "head-first; bull-headed; stubbornly",
+    "example_usage": "Er will mit dem Kopf durch die Wand.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Kopf"
+  },
+  {
+    "id": "das-ist-ein-fass-ohne-boden",
+    "phrase": "das ist ein Fass ohne Boden",
+    "definition": "that's a bottomless pit (no end to it)",
+    "example_usage": "Diese Diskussion ist ein Fass ohne Boden.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Fass"
+  },
+  {
+    "id": "wie-die-made-im-speck-leben",
+    "phrase": "wie die Made im Speck leben",
+    "definition": "to live like a king; in clover",
+    "example_usage": "Er lebt wie die Made im Speck.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Made"
+  },
+  {
+    "id": "ein-buch-mit-sieben-siegeln",
+    "phrase": "ein Buch mit sieben Siegeln",
+    "definition": "a closed book; incomprehensible",
+    "example_usage": "Physik ist für mich ein Buch mit sieben Siegeln.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Siegel"
+  },
+  {
+    "id": "das-geht-mir-auf-den-keks",
+    "phrase": "das geht mir auf den Keks",
+    "definition": "that's getting on my nerves",
+    "example_usage": "Dein Gejammer geht mir auf den Keks.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Keks"
+  },
+  {
+    "id": "nicht-alle-tassen-im-schrank-haben",
+    "phrase": "nicht alle Tassen im Schrank haben",
+    "definition": "to not have all one's marbles; be a bit crazy",
+    "example_usage": "Du hast wohl nicht alle Tassen im Schrank.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Tasse"
+  },
+  {
+    "id": "die-flinte-ins-korn-werfen",
+    "phrase": "die Flinte ins Korn werfen",
+    "definition": "to throw in the towel; give up",
+    "example_usage": "Wirf die Flinte nicht ins Korn!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Flinte"
+  },
+  {
+    "id": "die-segel-streichen",
+    "phrase": "die Segel streichen",
+    "definition": "to strike the sails; give up",
+    "example_usage": "Nach dem Streit strich er die Segel.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Segel"
+  },
+  {
+    "id": "die-nerven-behalten",
+    "phrase": "die Nerven behalten",
+    "definition": "to keep one's nerve; stay calm",
+    "example_usage": "Behalte die Nerven!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Nerv"
+  },
+  {
+    "id": "alles-unter-einen-hut-bringen",
+    "phrase": "alles unter einen Hut bringen",
+    "definition": "to reconcile conflicting demands",
+    "example_usage": "Wie soll ich alles unter einen Hut bringen?",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Hut"
+  },
+  {
+    "id": "zuckerbrot-und-peitsche",
+    "phrase": "Zuckerbrot und Peitsche",
+    "definition": "carrot and stick",
+    "example_usage": "Er führt mit Zuckerbrot und Peitsche.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Peitsche"
+  },
+  {
+    "id": "tote-aufwecken",
+    "phrase": "Tote aufwecken",
+    "definition": "to wake the dead (do something futile)",
+    "example_usage": "Mit diesem Vorschlag weckst du Tote auf.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Tot"
+  },
+  {
+    "id": "unter-aller-wuerde",
+    "phrase": "unter aller Würde",
+    "definition": "below dignity; beneath contempt",
+    "example_usage": "Das ist unter aller Würde!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/W%C3%BCrde"
+  },
+  {
+    "id": "schoenheit-im-auge-des-betrachters",
+    "phrase": "Schönheit liegt im Auge des Betrachters",
+    "definition": "beauty is in the eye of the beholder",
+    "example_usage": "Schönheit liegt im Auge des Betrachters.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Auge"
+  },
+  {
+    "id": "ein-fisch-auf-dem-trockenen",
+    "phrase": "wie ein Fisch auf dem Trockenen",
+    "definition": "like a fish out of water",
+    "example_usage": "Ich fühle mich hier wie ein Fisch auf dem Trockenen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Fisch"
+  },
+  {
+    "id": "ein-alter-hut-sein",
+    "phrase": "ein alter Hut sein",
+    "definition": "to be old hat; nothing new",
+    "example_usage": "Das ist doch ein alter Hut!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Hut"
+  },
+  {
+    "id": "der-apfel-faellt-nicht-weit-vom-stamm",
+    "phrase": "der Apfel fällt nicht weit vom Stamm",
+    "definition": "the apple doesn't fall far from the tree",
+    "example_usage": "Der Apfel fällt nicht weit vom Stamm.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Apfel"
+  },
+  {
+    "id": "uebung-macht-den-meister",
+    "phrase": "Übung macht den Meister",
+    "definition": "practice makes perfect",
+    "example_usage": "Übung macht den Meister.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Meister"
+  },
+  {
+    "id": "aller-anfang-ist-schwer",
+    "phrase": "Aller Anfang ist schwer",
+    "definition": "all beginnings are hard",
+    "example_usage": "Aller Anfang ist schwer.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Anfang"
+  },
+  {
+    "id": "morgenstund-hat-gold-im-mund",
+    "phrase": "Morgenstund hat Gold im Mund",
+    "definition": "the early bird catches the worm",
+    "example_usage": "Morgenstund hat Gold im Mund.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Morgenstunde"
+  },
+  {
+    "id": "sein-blaues-wunder-erleben",
+    "phrase": "sein blaues Wunder erleben",
+    "definition": "to get a nasty surprise",
+    "example_usage": "Mit dieser Maschine erlebst du dein blaues Wunder.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Wunder"
+  },
+  {
+    "id": "die-wogen-glaetten",
+    "phrase": "die Wogen glätten",
+    "definition": "to smooth the waters",
+    "example_usage": "Mit einer Entschuldigung konnte sie die Wogen glätten.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Woge"
+  },
+  {
+    "id": "haende-weg",
+    "phrase": "Hände weg von etwas",
+    "definition": "hands off something",
+    "example_usage": "Haltet die Hände weg von meinem Kuchen!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Hand"
+  },
+  {
+    "id": "die-hoehle-des-loewen-betreten",
+    "phrase": "die Höhle des Löwen betreten",
+    "definition": "to enter the lion's den",
+    "example_usage": "Er betrat die Höhle des Löwen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/H%C3%B6hle"
+  },
+  {
+    "id": "das-schwarze-schaf",
+    "phrase": "das schwarze Schaf",
+    "definition": "the black sheep (of the family)",
+    "example_usage": "Er ist das schwarze Schaf der Familie.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Schaf"
+  },
+  {
+    "id": "eulen-nach-athen-tragen",
+    "phrase": "Eulen nach Athen tragen",
+    "definition": "to carry owls to Athens (do something pointless)",
+    "example_usage": "Diese Erklärung trägt Eulen nach Athen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Eule"
+  },
+  {
+    "id": "salz-in-die-wunde-streuen",
+    "phrase": "Salz in die Wunde streuen",
+    "definition": "to pour salt on the wound",
+    "example_usage": "Mit dieser Aussage streust du Salz in die Wunde.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Wunde"
+  },
+  {
+    "id": "milch-ins-feuer-giessen",
+    "phrase": "Milch ins Feuer gießen",
+    "definition": "to add fuel to the fire",
+    "example_usage": "Mit dem Gerücht gießt du Milch ins Feuer.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Milch"
+  },
+  {
+    "id": "seine-hand-ins-feuer-legen",
+    "phrase": "seine Hand ins Feuer legen für",
+    "definition": "to vouch for someone",
+    "example_usage": "Ich würde meine Hand ins Feuer für sie legen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Hand"
+  },
+  {
+    "id": "wie-aus-heiterem-himmel",
+    "phrase": "wie aus heiterem Himmel",
+    "definition": "out of the blue",
+    "example_usage": "Wie aus heiterem Himmel kam die Absage.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Himmel"
+  },
+  {
+    "id": "aus-allen-wolken-fallen",
+    "phrase": "aus allen Wolken fallen",
+    "definition": "to be shocked; fall from the sky",
+    "example_usage": "Als ich die Nachricht hörte, fiel ich aus allen Wolken.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Wolke"
+  },
+  {
+    "id": "in-teufels-kueche-kommen",
+    "phrase": "in Teufels Küche kommen",
+    "definition": "to get into hot water",
+    "example_usage": "Mit dieser Aussage kommt er in Teufels Küche.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Teufel"
+  },
+  {
+    "id": "den-teufel-an-die-wand-malen",
+    "phrase": "den Teufel an die Wand malen",
+    "definition": "to imagine the worst",
+    "example_usage": "Mal nicht den Teufel an die Wand!",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Teufel"
+  },
+  {
+    "id": "den-roten-faden-verlieren",
+    "phrase": "den roten Faden verlieren",
+    "definition": "to lose the thread (of one's argument)",
+    "example_usage": "Ich habe den roten Faden verloren.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Faden"
+  },
+  {
+    "id": "ein-offenes-geheimnis",
+    "phrase": "ein offenes Geheimnis",
+    "definition": "an open secret",
+    "example_usage": "Es ist ein offenes Geheimnis.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Geheimnis"
+  },
+  {
+    "id": "die-welt-aus-den-angeln-heben",
+    "phrase": "die Welt aus den Angeln heben",
+    "definition": "to upheave the world; turn things upside down",
+    "example_usage": "Diese Entdeckung hebt die Welt aus den Angeln.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Angel"
+  },
+  {
+    "id": "salz-und-brot",
+    "phrase": "Salz und Brot",
+    "definition": "salt and bread (welcoming gesture)",
+    "example_usage": "Salz und Brot für unsere Gäste.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Brot"
+  },
+  {
+    "id": "ein-auge-zudruecken",
+    "phrase": "ein Auge zudrücken",
+    "definition": "to turn a blind eye",
+    "example_usage": "Da drücke ich mal ein Auge zu.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Auge"
+  },
+  {
+    "id": "den-mund-voll-nehmen",
+    "phrase": "den Mund voll nehmen",
+    "definition": "to talk big",
+    "example_usage": "Er nimmt den Mund ganz schön voll.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Mund"
+  },
+  {
+    "id": "sich-aufs-eis-begeben",
+    "phrase": "sich aufs Eis begeben",
+    "definition": "to tread on thin ice",
+    "example_usage": "Mit dieser Aussage begibst du dich aufs Eis.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Eis"
+  },
+  {
+    "id": "alles-hat-ein-ende",
+    "phrase": "alles hat ein Ende",
+    "definition": "everything has an end",
+    "example_usage": "Alles hat ein Ende, nur die Wurst hat zwei.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Ende"
+  },
+  {
+    "id": "eine-pechsträhne-haben",
+    "phrase": "eine Pechsträhne haben",
+    "definition": "to have a run of bad luck",
+    "example_usage": "Er hat eine Pechsträhne.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Pechstr%C3%A4hne"
+  },
+  {
+    "id": "das-pulver-nicht-erfunden-haben",
+    "phrase": "das Pulver nicht erfunden haben",
+    "definition": "to be no genius; not have invented gunpowder",
+    "example_usage": "Den Schalter habe ich nicht erfunden.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Pulver"
+  },
+  {
+    "id": "vor-freude-strahlen",
+    "phrase": "vor Freude strahlen",
+    "definition": "to beam with joy",
+    "example_usage": "Sie strahlte vor Freude.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/strahlen"
+  },
+  {
+    "id": "wie-der-vater-so-der-sohn",
+    "phrase": "wie der Vater so der Sohn",
+    "definition": "like father, like son",
+    "example_usage": "Wie der Vater, so der Sohn.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Vater"
+  },
+  {
+    "id": "die-kohlen-aus-dem-feuer-holen",
+    "phrase": "die Kohlen aus dem Feuer holen",
+    "definition": "to pull the chestnuts out of the fire",
+    "example_usage": "Er holte die Kohlen aus dem Feuer.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Kohle"
+  },
+  {
+    "id": "sein-wahres-gesicht-zeigen",
+    "phrase": "sein wahres Gesicht zeigen",
+    "definition": "to show one's true colours",
+    "example_usage": "Er zeigte sein wahres Gesicht.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Gesicht"
+  },
+  {
+    "id": "wie-man-in-den-wald-hineinruft",
+    "phrase": "wie man in den Wald hineinruft",
+    "definition": "as one shouts into the forest (one gets it back)",
+    "example_usage": "Wie man in den Wald hineinruft, so schallt es heraus.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Wald"
+  },
+  {
+    "id": "die-angst-im-nacken-spueren",
+    "phrase": "die Angst im Nacken spüren",
+    "definition": "to feel fear at one's back",
+    "example_usage": "Er spürte die Angst im Nacken.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Nacken"
+  },
+  {
+    "id": "haare-auf-den-zaehnen-haben",
+    "phrase": "Haare auf den Zähnen haben",
+    "definition": "to be a tough customer",
+    "example_usage": "Sie hat Haare auf den Zähnen.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Zahn"
+  },
+  {
+    "id": "das-ist-geschmackssache",
+    "phrase": "das ist Geschmackssache",
+    "definition": "that's a matter of taste",
+    "example_usage": "Ob Kaffee oder Tee — das ist Geschmackssache.",
+    "source_attribution": "dwds",
+    "frequency_band": "high",
+    "dwds_url": "https://www.dwds.de/wb/Geschmackssache"
+  },
+  {
+    "id": "die-grütze-im-kopf-haben",
+    "phrase": "die Grütze im Kopf haben",
+    "definition": "to have mush in one's head; not think straight",
+    "example_usage": "Er hat heute wirklich die Grütze im Kopf.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/die Grütze im Kopf haben"
+  },
+  {
+    "id": "die-daumen-gedrückt-halten",
+    "phrase": "Die Daumen gedrückt halten",
+    "definition": "to keep one's fingers crossed (for someone)",
+    "example_usage": "Haltet die Daumen gedrückt für sie!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/Die Daumen gedrückt halten"
+  },
+  {
+    "id": "mit-dem-strom-schwimmen",
+    "phrase": "mit dem Strom schwimmen",
+    "definition": "to go with the flow",
+    "example_usage": "Er schwimmt lieber mit dem Strom.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/mit dem Strom schwimmen"
+  },
+  {
+    "id": "die-geister-die-ich-rief",
+    "phrase": "die Geister, die ich rief",
+    "definition": "the spirits I summoned (got more than bargained for)",
+    "example_usage": "Die Geister, die ich rief, werd ich nun nicht los.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/die Geister, die ich rief"
+  },
+  {
+    "id": "die-suppe-auslöffeln",
+    "phrase": "die Suppe auslöffeln",
+    "definition": "to sup up the soup one brewed; face the consequences",
+    "example_usage": "Du musst die Suppe nun mal auslöffeln.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/die Suppe auslöffeln"
+  },
+  {
+    "id": "den-stier-bei-den-hörnern-packen",
+    "phrase": "den Stier bei den Hörnern packen",
+    "definition": "to take the bull by the horns",
+    "example_usage": "Pack den Stier bei den Hörnern und rede mit ihr!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/den Stier bei den Hörnern packen"
+  },
+  {
+    "id": "von-der-pike-auf-lernen",
+    "phrase": "von der Pike auf lernen",
+    "definition": "to learn from scratch; learn the trade from the bottom up",
+    "example_usage": "Er hat das Handwerk von der Pike auf gelernt.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/von der Pike auf lernen"
+  },
+  {
+    "id": "alles-unter-einem-dach",
+    "phrase": "alles unter einem Dach",
+    "definition": "all under one roof",
+    "example_usage": "Hier ist alles unter einem Dach.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/alles unter einem Dach"
+  },
+  {
+    "id": "jemandem-die-hölle-heiß-machen",
+    "phrase": "jemandem die Hölle heiß machen",
+    "definition": "to make someone's life hell",
+    "example_usage": "Sie hat ihm die Hölle heiß gemacht.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/jemandem die Hölle heiß machen"
+  },
+  {
+    "id": "eine-handvoll-leute",
+    "phrase": "eine Handvoll Leute",
+    "definition": "a handful of people",
+    "example_usage": "Eine Handvoll Leute hat das gesehen.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/eine Handvoll Leute"
+  },
+  {
+    "id": "die-schuld-auf-sich-nehmen",
+    "phrase": "die Schuld auf sich nehmen",
+    "definition": "to take the blame",
+    "example_usage": "Sie nahm die Schuld auf sich.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/die Schuld auf sich nehmen"
+  },
+  {
+    "id": "mit-jemandem-durch-dick-und-dünn-gehen",
+    "phrase": "mit jemandem durch dick und dünn gehen",
+    "definition": "to go through thick and thin with someone",
+    "example_usage": "Wir gehen durch dick und dünn.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/mit jemandem durch dick und dünn gehen"
+  },
+  {
+    "id": "tinte-gespritzt-haben",
+    "phrase": "Tinte gespritzt haben",
+    "definition": "to have spilled ink; to be a writer",
+    "example_usage": "Er hat viel Tinte gespritzt.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/Tinte gespritzt haben"
+  },
+  {
+    "id": "das-land-wo-die-zitronen-blühn",
+    "phrase": "das Land, wo die Zitronen blühn",
+    "definition": "the land where the lemons blossom (Italy)",
+    "example_usage": "Italien — das Land, wo die Zitronen blühn.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/das Land, wo die Zitronen blühn"
+  },
+  {
+    "id": "jemanden-an-der-nase-herumführen",
+    "phrase": "jemanden an der Nase herumführen",
+    "definition": "to lead someone by the nose; pull one's leg",
+    "example_usage": "Sie führt dich an der Nase herum.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/jemanden an der Nase herumführen"
+  },
+  {
+    "id": "sich-die-hörner-abstoßen",
+    "phrase": "sich die Hörner abstoßen",
+    "definition": "to sow one's wild oats",
+    "example_usage": "Er hat sich in der Jugend die Hörner abgestoßen.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/sich die Hörner abstoßen"
+  },
+  {
+    "id": "ein-hühnchen-zu-rupfen-haben",
+    "phrase": "ein Hühnchen zu rupfen haben",
+    "definition": "to have a bone to pick with someone",
+    "example_usage": "Mit dir hab ich noch ein Hühnchen zu rupfen.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/ein Hühnchen zu rupfen haben"
+  },
+  {
+    "id": "die-daumen-sind-nicht-der-einzige-finger",
+    "phrase": "die Daumen sind nicht der einzige Finger",
+    "definition": "there's more to life than luck",
+    "example_usage": "Die Daumen sind nicht der einzige Finger — handle the work too.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/die Daumen sind nicht der einzige Finger"
+  },
+  {
+    "id": "ein-schritt-nach-dem-anderen",
+    "phrase": "ein Schritt nach dem anderen",
+    "definition": "one step at a time",
+    "example_usage": "Immer ein Schritt nach dem anderen.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/ein Schritt nach dem anderen"
+  },
+  {
+    "id": "sein-licht-unter-den-scheffel-stellen",
+    "phrase": "sein Licht unter den Scheffel stellen",
+    "definition": "to hide one's light under a bushel",
+    "example_usage": "Stell dein Licht nicht unter den Scheffel.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/sein Licht unter den Scheffel stellen"
+  },
+  {
+    "id": "jemandem-sand-in-die-augen-streuen",
+    "phrase": "jemandem Sand in die Augen streuen",
+    "definition": "to throw dust in someone's eyes",
+    "example_usage": "Streu mir keinen Sand in die Augen.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/jemandem Sand in die Augen streuen"
+  },
+  {
+    "id": "die-spreu-vom-weizen-trennen",
+    "phrase": "die Spreu vom Weizen trennen",
+    "definition": "to separate the wheat from the chaff",
+    "example_usage": "Trenne die Spreu vom Weizen.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/die Spreu vom Weizen trennen"
+  },
+  {
+    "id": "in-der-klemme-stecken",
+    "phrase": "in der Klemme stecken",
+    "definition": "to be in a fix; in a tight spot",
+    "example_usage": "Er steckt in der Klemme.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/in der Klemme stecken"
+  },
+  {
+    "id": "sich-etw-hinter-die-ohren-schreiben",
+    "phrase": "sich etw. hinter die Ohren schreiben",
+    "definition": "to etch something in one's memory",
+    "example_usage": "Schreib dir das hinter die Ohren!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/sich etw. hinter die Ohren schreiben"
+  },
+  {
+    "id": "schritt-für-schritt",
+    "phrase": "Schritt für Schritt",
+    "definition": "step by step",
+    "example_usage": "Schritt für Schritt ans Ziel.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/Schritt für Schritt"
+  },
+  {
+    "id": "die-ohren-steif-halten",
+    "phrase": "die Ohren steif halten",
+    "definition": "to keep one's chin up; stay brave",
+    "example_usage": "Halt die Ohren steif!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/die Ohren steif halten"
+  },
+  {
+    "id": "jemandem-auf-den-zahn-fühlen",
+    "phrase": "jemandem auf den Zahn fühlen",
+    "definition": "to sound someone out",
+    "example_usage": "Fühl ihm mal auf den Zahn!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/jemandem auf den Zahn fühlen"
+  },
+  {
+    "id": "in-den-sauren-apfel-beißen",
+    "phrase": "in den sauren Apfel beißen",
+    "definition": "to bite the bullet",
+    "example_usage": "Da musst du halt in den sauren Apfel beißen.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/in den sauren Apfel beißen"
+  },
+  {
+    "id": "um-die-ecke-denken",
+    "phrase": "um die Ecke denken",
+    "definition": "to think outside the box",
+    "example_usage": "Denk mal um die Ecke!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/um die Ecke denken"
+  },
+  {
+    "id": "sich-ins-zeug-legen",
+    "phrase": "sich ins Zeug legen",
+    "definition": "to pull out all the stops",
+    "example_usage": "Leg dich ins Zeug!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/sich ins Zeug legen"
+  },
+  {
+    "id": "um-haaresbreite",
+    "phrase": "um Haaresbreite",
+    "definition": "by a hair's breadth",
+    "example_usage": "Sie entkam um Haaresbreite.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/um Haaresbreite"
+  },
+  {
+    "id": "heißes-eisen",
+    "phrase": "heißes Eisen",
+    "definition": "hot iron (sensitive topic)",
+    "example_usage": "Das Thema ist ein heißes Eisen.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/heißes Eisen"
+  },
+  {
+    "id": "mit-dem-feuer-spielen",
+    "phrase": "mit dem Feuer spielen",
+    "definition": "to play with fire",
+    "example_usage": "Er spielt mit dem Feuer.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/mit dem Feuer spielen"
+  },
+  {
+    "id": "eine-ruhige-kugel-schieben",
+    "phrase": "eine ruhige Kugel schieben",
+    "definition": "to lead a quiet life; take it easy",
+    "example_usage": "Er schiebt eine ruhige Kugel.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/eine ruhige Kugel schieben"
+  },
+  {
+    "id": "eine-glatte-eins",
+    "phrase": "eine glatte Eins",
+    "definition": "a straight A",
+    "example_usage": "Sie hat eine glatte Eins geschrieben.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/eine glatte Eins"
+  },
+  {
+    "id": "in-den-schuhen-eines-anderen-stecken",
+    "phrase": "in den Schuhen eines anderen stecken",
+    "definition": "to walk in someone else's shoes",
+    "example_usage": "Steck mal in meinen Schuhen!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/in den Schuhen eines anderen stecken"
+  },
+  {
+    "id": "auge-um-auge-zahn-um-zahn",
+    "phrase": "Auge um Auge, Zahn um Zahn",
+    "definition": "an eye for an eye, a tooth for a tooth",
+    "example_usage": "Auge um Auge, Zahn um Zahn.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/Auge um Auge, Zahn um Zahn"
+  },
+  {
+    "id": "der-drops-ist-gelutscht",
+    "phrase": "der drops ist gelutscht",
+    "definition": "the drop is sucked (the deal is done)",
+    "example_usage": "Der Drops ist gelutscht — der Vertrag ist unterschrieben.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/der drops ist gelutscht"
+  },
+  {
+    "id": "sich-zum-affen-machen",
+    "phrase": "sich zum Affen machen",
+    "definition": "to make a fool of oneself",
+    "example_usage": "Mach dich nicht zum Affen!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/sich zum Affen machen"
+  },
+  {
+    "id": "an-allem-hapern",
+    "phrase": "an allem hapern",
+    "definition": "to be lacking in everything",
+    "example_usage": "An Geld hapert es bei uns immer.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/an allem hapern"
+  },
+  {
+    "id": "die-kirche-im-dorf",
+    "phrase": "die Kirche im Dorf",
+    "definition": "keeping things in proportion",
+    "example_usage": "Lass mal die Kirche im Dorf!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/die Kirche im Dorf"
+  },
+  {
+    "id": "die-oliven-ins-feuer-werfen",
+    "phrase": "die Oliven ins Feuer werfen",
+    "definition": "to throw the olives into the fire",
+    "example_usage": "Die Oliven ins Feuer zu werfen ist sinnlos.",
+    "source_attribution": "dwds",
+    "frequency_band": "low",
+    "dwds_url": "https://www.dwds.de/wb/die Oliven ins Feuer werfen"
+  },
+  {
+    "id": "eselsbrücke-bauen",
+    "phrase": "Eselsbrücke bauen",
+    "definition": "to build a donkey bridge; mnemonics",
+    "example_usage": "Eine Eselsbrücke half mir beim Lernen.",
+    "source_attribution": "dwds",
+    "frequency_band": "low",
+    "dwds_url": "https://www.dwds.de/wb/Eselsbrücke bauen"
+  },
+  {
+    "id": "nicht-alle-latten-am-zaun-haben",
+    "phrase": "nicht alle Latten am Zaun haben",
+    "definition": "to not have all slats on the fence (one's marbles)",
+    "example_usage": "Du hast wohl nicht alle Latten am Zaun.",
+    "source_attribution": "dwds",
+    "frequency_band": "low",
+    "dwds_url": "https://www.dwds.de/wb/nicht alle Latten am Zaun haben"
+  },
+  {
+    "id": "der-lack-ist-ab",
+    "phrase": "der Lack ist ab",
+    "definition": "the lacquer is gone; once fresh, now worn out",
+    "example_usage": "Vom Lack her ist er nicht mehr frisch.",
+    "source_attribution": "dwds",
+    "frequency_band": "low",
+    "dwds_url": "https://www.dwds.de/wb/der Lack ist ab"
+  },
+  {
+    "id": "eine-leiche-im-keller-haben",
+    "phrase": "eine Leiche im Keller haben",
+    "definition": "to have a body in the cellar; have a dark secret",
+    "example_usage": "Die Firma hat eine Leiche im Keller.",
+    "source_attribution": "dwds",
+    "frequency_band": "low",
+    "dwds_url": "https://www.dwds.de/wb/eine Leiche im Keller haben"
+  },
+  {
+    "id": "die-füße-still-halten",
+    "phrase": "die Füße still halten",
+    "definition": "to keep one's feet still (be patient)",
+    "example_usage": "Halt die Füße still!",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/die Füße still halten"
+  },
+  {
+    "id": "das-für-und-wider-abwägen",
+    "phrase": "das Für und Wider abwägen",
+    "definition": "to weigh the pros and cons",
+    "example_usage": "Wir müssen das Für und Wider abwägen.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/das Für und Wider abwägen"
+  },
+  {
+    "id": "ein-haar-in-der-suppe-finden",
+    "phrase": "ein Haar in der Suppe finden",
+    "definition": "to find a hair in the soup (find fault)",
+    "example_usage": "Er findet immer ein Haar in der Suppe.",
+    "source_attribution": "dwds",
+    "frequency_band": "mid",
+    "dwds_url": "https://www.dwds.de/wb/ein Haar in der Suppe finden"
+  },
+  {
+    "id": "wo-sich-fuchs-und-hase-gute-nacht-sagen",
+    "phrase": "wo sich Fuchs und Hase gute Nacht sagen",
+    "definition": "where the fox and hare say goodnight (in the middle of nowhere)",
+    "example_usage": "Hier sagt sich Fuchs und Hase gute Nacht.",
+    "source_attribution": "dwds",
+    "frequency_band": "low",
+    "dwds_url": "https://www.dwds.de/wb/wo sich Fuchs und Hase gute Nacht sagen"
+  },
+  {
+    "id": "sich-hüten-wie-ein-eichhörnchen",
+    "phrase": "sich hüten wie ein Eichhörnchen",
+    "definition": "to be cautious like a squirrel",
+    "example_usage": "Er hütet sich wie ein Eichhörnchen.",
+    "source_attribution": "dwds",
+    "frequency_band": "low",
+    "dwds_url": "https://www.dwds.de/wb/sich hüten wie ein Eichhörnchen"
+  },
+  {
+    "id": "sich-jemandem-ans-bein-hängen",
+    "phrase": "sich jemandem ans Bein hängen",
+    "definition": "to cling to someone",
+    "example_usage": "Häng dich nicht an jeden ans Bein.",
+    "source_attribution": "dwds",
+    "frequency_band": "low",
+    "dwds_url": "https://www.dwds.de/wb/sich jemandem ans Bein hängen"
+  },
+  {
+    "id": "wie-ein-fisch-im-wasser",
+    "phrase": "wie ein Fisch im Wasser",
+    "definition": "like a fish in water; in one's element",
+    "example_usage": "Sie ist wie ein Fisch im Wasser auf der Bühne.",
+    "source_attribution": "dwds",
+    "frequency_band": "low",
+    "dwds_url": "https://www.dwds.de/wb/wie ein Fisch im Wasser"
+  }
+]
