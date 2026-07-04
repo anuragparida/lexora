@@ -62,6 +62,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app import crud, models
+from app.bilingual import PartnerLang, lookup_partner_translation
 from app.cloze import select_target_word  # noqa: F401 — re-used (no cloze.py diff)
 from app.llm import _DSPyOpenAICompatLM  # the shared adapter; see app.llm docstring
 from app.observability import get_langfuse
@@ -136,8 +137,12 @@ class MatchingExercise(BaseModel):
     mirror the bounds so a drift surfaces as a Pydantic
     ValidationError at generation time, not a runtime shape
     mismatch on the wire.
-    """
 
+    Phase 7.4 (card t_d621bb4f) — ``partner_translation`` is the
+    bilingual read-through field. Populated when ``partner_lang="en"``
+    AND a collocations row exists for the target; ``None``
+    otherwise. Mirrors the wire field on ``MatchingExerciseOut``.
+    """
     target_word_id: int = Field(..., description="FK to words.id of the matching target.")
     pairs: list[MatchingPair] = Field(
         ...,
@@ -147,7 +152,17 @@ class MatchingExercise(BaseModel):
             f"Match pairs the user connects (left -> right). Length "
             f"is bounded in [{MATCH_MIN_COUNT}, {MATCH_MAX_COUNT}] "
             f"by the module constants; the wire constraint mirrors "
-            f"it so a validation drift surfaces as 422."
+            f"it so a validation drift surfaces as a 422."
+        ),
+    )
+    partner_translation: str | None = Field(
+        default=None,
+        description=(
+            "Phase 7.4 — bilingual read-through. Populated from "
+            "``collocations.partner_lemma`` for the target word "
+            "when ``partner_lang='en'`` AND a collocation row "
+            "exists. ``None`` otherwise. Mirrors the wire field "
+            "on ``MatchingExerciseOut``."
         ),
     )
 
@@ -476,6 +491,7 @@ def generate_match(
     force_word_id: int | None = None,
     count: int = MATCH_DEFAULT_COUNT,
     enable_rag: bool = False,
+    partner_lang: PartnerLang = "de",
 ) -> MatchingExercise:
     """Generate one ``MatchingExercise`` for a logged-in user.
 
@@ -491,8 +507,13 @@ def generate_match(
     4. Wrap an OpenRouter-targeted OpenAI client with ``instructor``
        and call ``chat.completions.create(response_model=MatchingExercise,
        ..., max_retries=MAX_ATTEMPTS)``.
-    5. Stamp metadata; call ``_trace_match`` with the metadata dict.
-    6. Return the validated Pydantic instance.
+    5. **Phase 7.4** — if ``partner_lang="en"``, look up
+       ``collocations.partner_lemma`` for the target word via
+       ``app.bilingual.lookup_partner_translation`` and stamp
+       ``partner_translation`` onto the result. Fail-soft: missing
+       table or row → ``partner_translation=None``.
+    6. Stamp metadata; call ``_trace_match`` with the metadata dict.
+    7. Return the validated Pydantic instance.
 
     Parameters
     ----------
@@ -508,6 +529,13 @@ def generate_match(
     enable_rag
         When True, augment the prompt with retrieval chunks from
         ``/retrieve``. Default ``False`` (Hard rule #1: opt-in).
+    partner_lang
+        Phase 7.4. ``"de"`` (default — bilingual off,
+        ``partner_translation=None``) or ``"en"`` (look up the
+        English counterpart in ``collocations``). Fail-soft
+        contract: a missing row or missing table both yield
+        ``partner_translation=None`` — the route never 500s on
+        a missing translation.
 
     Returns
     -------
@@ -573,6 +601,7 @@ def generate_match(
         "target_word_id": word.id,
         "count": count,
         "enable_rag": enable_rag,
+        "partner_lang": partner_lang,  # Phase 7.4
         "retrieved_chunk_count": len(retrieved_chunks),
         "model_id": _default_model(),
         "prompt_template_version": PROMPT_TEMPLATE_VERSION,
@@ -633,6 +662,22 @@ def generate_match(
     # ``result.target_word_id`` should already match the input
     # word's id (the LLM echoes back the FK). We force-stamp it
     # so a model drift can never silently mismatch the request.
+
+    # Phase 7.4 — bilingual read-through. When ``partner_lang="en"``,
+    # look up ``collocations.partner_lemma`` for the target word and
+    # stamp ``partner_translation`` onto the result. Fail-soft:
+    # missing table or row → ``partner_translation=None`` (the
+    # default value of the field, so this is a no-op when
+    # ``partner_lang="de"``).
+    if partner_lang == "en":
+        partner_translation = lookup_partner_translation(
+            db, result.target_word_id, partner_lang
+        )
+        # ``model_copy`` keeps the Pydantic instance identity for
+        # downstream consumers; ``update=`` does a deep merge so
+        # the LLM's other fields (pairs, target_word_id, etc.)
+        # are preserved.
+        result = result.model_copy(update={"partner_translation": partner_translation})
 
     raw_response = getattr(result, "_raw_response", None)
     if raw_response is not None:

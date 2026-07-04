@@ -586,20 +586,36 @@ class TestClozeGenerateRequest:
 
     def test_explicit_true_round_trips(self):
         """``ClozeGenerateRequest(enable_rag=True)`` serialises
-        to ``{"enable_rag": true}`` on the wire."""
+        to ``{"enable_rag": true, "partner_lang": "de"}`` on the
+        wire.
+
+        Phase 7.4 (card t_d621bb4f) widens the schema with
+        ``partner_lang: Literal["de","en"] = "de"`` — the new
+        default field rides along on the wire, so the round-trip
+        carries it too. The default keeps the Phase 4.5 / 6.1
+        wire contract verbatim (no schema drift for existing
+        callers — they ignore the extra key).
+        """
         req = ClozeGenerateRequest(enable_rag=True)
         assert req.enable_rag is True
+        assert req.partner_lang == "de"
         # ``model_dump`` is the JSON-ready dict; ``model_dump_json``
-        # is the wire string. Both should carry the flag.
-        assert req.model_dump() == {"enable_rag": True}
-        assert req.model_dump_json() == '{"enable_rag":true}'
+        # is the wire string. Both should carry both fields.
+        assert req.model_dump() == {"enable_rag": True, "partner_lang": "de"}
+        assert req.model_dump_json() == '{"enable_rag":true,"partner_lang":"de"}'
 
     def test_explicit_false_round_trips(self):
         """``ClozeGenerateRequest(enable_rag=False)`` is also
-        accepted (default + explicit agree on the wire)."""
+        accepted (default + explicit agree on the wire).
+
+        Phase 7.4 — same shape as the explicit-True test:
+        ``partner_lang`` rides along on the wire as the
+        default ``"de"``.
+        """
         req = ClozeGenerateRequest(enable_rag=False)
         assert req.enable_rag is False
-        assert req.model_dump_json() == '{"enable_rag":false}'
+        assert req.partner_lang == "de"
+        assert req.model_dump_json() == '{"enable_rag":false,"partner_lang":"de"}'
 
     def test_non_bool_enable_rag_is_rejected(self):
         """Non-bool ``enable_rag`` (list / dict) is a

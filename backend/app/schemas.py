@@ -525,6 +525,17 @@ class ClozeExerciseOut(BaseExerciseFields):
     )
     difficulty: ClozeDifficulty
     rationale: str = Field(..., min_length=1, max_length=400)
+    partner_translation: str | None = Field(
+        default=None,
+        description=(
+            "Phase 7.4 — bilingual read-through. Populated from "
+            "``collocations.partner_lemma`` for the target word "
+            "when the request's ``partner_lang=\"en\"`` AND a "
+            "collocation row exists for the target. ``None`` when "
+            "``partner_lang=\"de\"`` (default) or no row exists. "
+            "Mirrors the matching wire field on the same flag."
+        ),
+    )
 
     @model_validator(mode="after")
     def _target_matches_answer(self) -> "ClozeExerciseOut":
@@ -547,6 +558,21 @@ class ClozeExerciseOut(BaseExerciseFields):
         return self
 
 
+# The single source of truth for the 2-way partner-language union
+# (Phase 7.4 / card t_d621bb4f). The Pydantic ``Literal`` is the
+# wire-level guardrail — anything outside ``{"de", "en"}`` is a
+# 422 at the request body layer, NOT a runtime check downstream
+# (Hard rule H4). The matching and cloze request schemas both
+# reference this alias; a future widening (``"fr"``) is a single
+# edit here plus the matching accept-arm in the generator.
+#
+# This union is deliberately narrow. PHASE-7.md §"What is NOT in
+# Phase 7" defers ``"fr"`` (and any 3rd partner language) out of
+# Phase 7; the comprehension endpoint is left for Phase 8 — it
+# doesn't import this alias.
+PartnerLang = Literal["de", "en"]
+
+
 # Phase 6.1 (card t_616cc266) — request body for
 # ``POST /exercises/cloze``. The Phase 4.5 endpoint accepted an
 # empty body; this card adds the optional ``enable_rag`` field.
@@ -555,10 +581,18 @@ class ClozeExerciseOut(BaseExerciseFields):
 class ClozeGenerateRequest(BaseModel):
     """Request body for ``POST /exercises/cloze``.
 
-    Phase 6.1 — the only field is ``enable_rag`` (default
-    ``False``). An empty body ``{}`` parses to
-    ``ClozeGenerateRequest(enable_rag=False)`` via Pydantic's
-    defaults, so the Phase 4.5 wire contract is preserved.
+    Phase 6.1 — the field is ``enable_rag`` (default ``False``).
+    Phase 7.4 (card t_d621bb4f) widens with ``partner_lang`` (default
+    ``"de"``). An empty body ``{}`` parses to
+    ``ClozeGenerateRequest(enable_rag=False, partner_lang="de")``
+    via Pydantic's defaults, so the Phase 4.5 / 6.1 wire contract
+    is preserved verbatim — existing callers see no schema change
+    (Hard rule H10: byte-for-byte unchanged).
+
+    Phase 7.3 (card t_d621bb4f-parent-not-yet-landed) is planned
+    to add ``collocation: bool = False``; it isn't part of this
+    card. When 7.3 lands, the only edit here is one more field
+    with the same default-True-pattern.
     """
 
     enable_rag: bool = Field(
@@ -571,6 +605,20 @@ class ClozeGenerateRequest(BaseModel):
             "(default), the prompt is byte-for-byte identical to "
             "Phase 4.2's — keeps the offline eval reproducible "
             "for A/B comparison."
+        ),
+    )
+    partner_lang: PartnerLang = Field(
+        default="de",
+        description=(
+            "Phase 7.4 — opt-in bilingual flag. When ``\"en\"``, "
+            "the response's ``partner_translation`` field is "
+            "populated from ``collocations.partner_lemma`` for "
+            "the target word (when such a row exists). When "
+            "``\"de\"`` (default), ``partner_translation`` is "
+            "always ``None`` — bilingual is opt-in (Hard rule "
+            "H3). Values outside the literal (``\"fr\"``) are "
+            "rejected at the Pydantic layer with a 422 (Hard "
+            "rule H4)."
         ),
     )
 
@@ -969,6 +1017,13 @@ class MatchingExerciseOut(BaseExerciseFields):
     the Ragas join is deterministic (Phase 6.7 follow-up). Mirrors
     the ``GradeRequest.exercise_id: int`` discriminator on the write
     side.
+
+    Phase 7.4 (card t_d621bb4f) — ``partner_translation`` is the
+    bilingual read-through field. It's ``None`` when ``partner_lang``
+    on the request is ``"de"`` (default) OR when no collocations row
+    exists for the target word. It's the ``partner_lemma`` string
+    from the ``collocations`` table when ``partner_lang="en"`` AND a
+    collocation row exists for the target word.
     """
 
     exercise_type: Literal["matching"] = "matching"
@@ -993,6 +1048,16 @@ class MatchingExerciseOut(BaseExerciseFields):
             "shape mismatch."
         ),
     )
+    partner_translation: str | None = Field(
+        default=None,
+        description=(
+            "Phase 7.4 — bilingual read-through. Populated from "
+            "``collocations.partner_lemma`` for the target word when "
+            "the request's ``partner_lang=\"en\"`` AND a collocation "
+            "row exists for the target. ``None`` when "
+            "``partner_lang=\"de\"`` (default) or no row exists."
+        ),
+    )
 
 
 # These bounds mirror the generator's hard-coded module constants in
@@ -1004,9 +1069,12 @@ class MatchGenerateRequest(BaseModel):
 
     Mirrors the ``GradeRequest`` shape (Phase 5.2): minimal request
     body, the server picks the target word via ``select_target_word``
-    and builds the rest. The two knobs the caller can tweak are
-    ``count`` (how many pairs to generate) and ``enable_rag``
-    (RAG-on is opt-in — Hard rule #1).
+    and builds the rest. The knobs the caller can tweak are
+    ``count`` (how many pairs to generate), ``enable_rag``
+    (RAG-on is opt-in — Hard rule #1), and Phase 7.4's
+    ``partner_lang`` (bilingual exercise is opt-in — Hard rule H3).
+    The default ``partner_lang="de"`` keeps the Phase 6.2 / 6.3
+    wire contract byte-for-byte unchanged (Hard rule H10).
     """
 
     count: int = Field(
@@ -1026,5 +1094,18 @@ class MatchGenerateRequest(BaseModel):
             "chunks from the /retrieve endpoint. False (default) "
             "keeps the prompt byte-for-byte identical to the "
             "no-RAG fixture so the offline eval stays reproducible."
+        ),
+    )
+    partner_lang: PartnerLang = Field(
+        default="de",
+        description=(
+            "Phase 7.4 — opt-in bilingual flag. When ``\"en\"``, "
+            "the response's ``partner_translation`` field is "
+            "populated from ``collocations.partner_lemma`` for "
+            "the target word (when such a row exists). When "
+            "``\"de\"`` (default), ``partner_translation`` is "
+            "always ``None``. Values outside the literal "
+            "(``\"fr\"``) are rejected at the Pydantic layer with "
+            "a 422 (Hard rule H4)."
         ),
     )

@@ -589,7 +589,7 @@ def generate_cloze_exercise(
     cost.
 
     **Phase 6.1** — the request body is a
-    ``ClozeGenerateRequest`` with the single field
+    ``ClozeGenerateRequest`` with the field
     ``enable_rag: bool = False``. An empty body ``{}`` parses to
     the default (``enable_rag=False``), preserving the Phase 4.5
     wire contract verbatim — existing callers see no change. When
@@ -597,6 +597,16 @@ def generate_cloze_exercise(
     includes ``retrieved_chunks`` (Postgres + pgvector only; on
     SQLite the call gracefully degrades to the non-RAG prompt —
     see ``app.cloze._retrieve_for_cloze`` for the fallback path).
+
+    **Phase 7.4** — ``ClozeGenerateRequest`` widens with
+    ``partner_lang: Literal["de","en"] = "de"``. The default
+    ``"de"`` keeps the Phase 4.5 / 6.1 wire contract verbatim
+    (Hard rule H10). When ``partner_lang="en"``, the cloze
+    generator stamps ``partner_translation`` onto the response
+    from ``collocations.partner_lemma`` for the target word
+    (fail-soft: missing row or missing table → ``None``).
+    Values outside the literal (``"fr"``) are rejected at the
+    Pydantic layer with a 422 (Hard rule H4).
 
     **Response** — the route maps the
     ``app.cloze.ClozeExercise`` (generator contract) to the
@@ -631,7 +641,10 @@ def generate_cloze_exercise(
     started = time.perf_counter()
     try:
         exercise = generate_cloze(
-            db, current_user.id, enable_rag=payload.enable_rag
+            db,
+            current_user.id,
+            enable_rag=payload.enable_rag,
+            partner_lang=payload.partner_lang,
         )
     except LLMError as exc:
         logger.error(
@@ -679,6 +692,10 @@ def generate_cloze_exercise(
         distractors=exercise.distractors,
         difficulty=exercise.difficulty,
         rationale=exercise.rationale,
+        # Phase 7.4 — bilingual read-through (set by ``generate_cloze``
+        # when ``partner_lang='en'`` AND a collocations row exists;
+        # ``None`` otherwise).
+        partner_translation=exercise.partner_translation,
         # Shared metadata (Phase 6.1)
         exercise_type="cloze",
         target_word_id=exercise.answer_word_id,
@@ -731,9 +748,9 @@ def generate_match_exercise(
     """Generate one matching exercise for the logged-in learner.
 
     Body: ``MatchGenerateRequest`` — ``count`` (default 4, in
-    [2, 8]) and ``enable_rag`` (default ``False``). The server
-    picks the target word via ``select_target_word`` and builds the
-    rest.
+    [2, 8]), ``enable_rag`` (default ``False``), and Phase 7.4's
+    ``partner_lang`` (default ``"de"``). The server picks the
+    target word via ``select_target_word`` and builds the rest.
 
     The route mirrors ``POST /exercises/cloze``: thin handler,
     imports ``app.match`` lazily so the module-level ``main.py``
@@ -741,6 +758,11 @@ def generate_match_exercise(
     way out, and stamps a server-minted ``exercise_id`` so the same
     id re-appears on the future ``grade_logs`` row for Ragas join
     determinism.
+
+    Phase 7.4 — when ``partner_lang="en"``, ``generate_match``
+    stamps ``partner_translation`` onto the response from
+    ``collocations.partner_lemma`` (fail-soft: missing row or
+    missing table → ``None``).
     """
     import os
     import time
@@ -759,6 +781,7 @@ def generate_match_exercise(
             current_user.id,
             count=payload.count,
             enable_rag=payload.enable_rag,
+            partner_lang=payload.partner_lang,
         )
     except LLMError as exc:
         logger.error(
@@ -836,6 +859,10 @@ def generate_match_exercise(
             "trace_id": None,
             "latency_ms": match_latency_ms,
             "pairs": [p.model_dump() for p in exercise.pairs],
+            # Phase 7.4 — bilingual read-through (set by
+            # ``generate_match`` when ``partner_lang='en'`` AND a
+            # collocations row exists; ``None`` otherwise).
+            "partner_translation": exercise.partner_translation,
         }
     )
 
