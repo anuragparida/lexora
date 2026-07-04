@@ -1,0 +1,275 @@
+{"verb_lemma": "warten", "preposition": "auf", "case": "Akk", "example_sentence": "Ich warte auf den Bus.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "warten", "preposition": "auf", "case": "Akk", "example_sentence": "Sie wartet auf das Ergebnis.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "warten", "preposition": "mit", "case": "Dat", "example_sentence": "Der Bus wartet mit der Abfahrt auf uns.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "denken", "preposition": "an", "case": "Akk", "example_sentence": "Ich denke oft an meine Kindheit.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "denken", "preposition": "an", "case": "Akk", "example_sentence": "Denke an die Prüfung!", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "denken", "preposition": "über", "case": "Akk", "example_sentence": "Wir denken über das Angebot nach.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "denken", "preposition": "von", "case": "Dat", "example_sentence": "Ich denke von dir.", "frequency_score": 0.3, "source_corpus": "wiktionary"}
+{"verb_lemma": "sprechen", "preposition": "mit", "case": "Dat", "example_sentence": "Sie spricht mit ihrem Lehrer.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "sprechen", "preposition": "mit", "case": "Dat", "example_sentence": "Er spricht mit seinen Freunden über Politik.", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "sprechen", "preposition": "über", "case": "Akk", "example_sentence": "Wir sprechen über das Wetter.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "sprechen", "preposition": "von", "case": "Dat", "example_sentence": "Das Buch spricht von Liebe.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "sprechen", "preposition": "bei", "case": "Dat", "example_sentence": "Er spricht beim Empfang.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "sprechen", "preposition": "für", "case": "Akk", "example_sentence": "Ich spreche für alle.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "reden", "preposition": "mit", "case": "Dat", "example_sentence": "Ich rede mit dir.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "reden", "preposition": "über", "case": "Akk", "example_sentence": "Reden wir über die Zukunft.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "reden", "preposition": "von", "case": "Dat", "example_sentence": "Davon kann keine Rede sein.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "reden", "preposition": "gegen", "case": "Akk", "example_sentence": "Alle reden gegen den Vorschlag.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "arbeiten", "preposition": "an", "case": "Dat", "example_sentence": "Sie arbeitet an einem neuen Projekt.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "arbeiten", "preposition": "an", "case": "Dat", "example_sentence": "Er arbeitet seit Wochen an dem Roman.", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "arbeiten", "preposition": "bei", "case": "Dat", "example_sentence": "Sie arbeitet bei Siemens.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "arbeiten", "preposition": "mit", "case": "Dat", "example_sentence": "Er arbeitet mit Kindern.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "arbeiten", "preposition": "für", "case": "Akk", "example_sentence": "Sie arbeitet für eine NGO.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "arbeiten", "preposition": "in", "case": "Dat", "example_sentence": "Er arbeitet in Berlin.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "arbeiten", "preposition": "gegen", "case": "Akk", "example_sentence": "Wir arbeiten gegen die Zeit.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "leben", "preposition": "mit", "case": "Dat", "example_sentence": "Sie lebt mit ihren Eltern.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "leben", "preposition": "von", "case": "Dat", "example_sentence": "Er lebt von Brot und Wasser.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "leben", "preposition": "in", "case": "Dat", "example_sentence": "Wir leben in Deutschland.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "leben", "preposition": "bei", "case": "Dat", "example_sentence": "Sie lebt bei ihrer Schwester.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "leben", "preposition": "für", "case": "Akk", "example_sentence": "Er lebt für die Musik.", "frequency_score": 0.72, "source_corpus": "dwds"}
+{"verb_lemma": "leben", "preposition": "unter", "case": "Dat", "example_sentence": "Die Pflanze lebt unter Wasser.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "sterben", "preposition": "an", "case": "Dat", "example_sentence": "Er stirbt an einer Krankheit.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "sterben", "preposition": "für", "case": "Akk", "example_sentence": "Viele starben für die Freiheit.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "sterben", "preposition": "vor", "case": "Dat", "example_sentence": "Er stirbt vor Kälte.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "sterben", "preposition": "in", "case": "Dat", "example_sentence": "Sie starb in der Nacht.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "helfen", "preposition": "bei", "case": "Dat", "example_sentence": "Er hilft mir bei der Arbeit.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "helfen", "preposition": "mit", "case": "Dat", "example_sentence": "Das hilft mir mit dem Problem.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "helfen", "preposition": "gegen", "case": "Akk", "example_sentence": "Das hilft gegen die Schmerzen.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "helfen", "preposition": "zu", "case": "Dat", "example_sentence": "Das hilft zum Verständnis.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "helfen", "preposition": "aus", "case": "Dat", "example_sentence": "Er hilft mir aus der Patsche.", "frequency_score": 0.5, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "mit", "case": "Dat", "example_sentence": "Er geht mit seiner Freundin ins Kino.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "zu", "case": "Dat", "example_sentence": "Wir gehen zur Schule.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "in", "case": "Akk", "example_sentence": "Sie geht in die Stadt.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "auf", "case": "Akk", "example_sentence": "Er geht auf die Straße.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "um", "case": "Akk", "example_sentence": "Wir gehen um den See.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "nach", "case": "Dat", "example_sentence": "Gehen wir nach Hause!", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "gegen", "case": "Akk", "example_sentence": "Gehen wir gegen das Vorurteil an!", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "an", "case": "Dat", "example_sentence": "Er geht an die Decke.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "durch", "case": "Akk", "example_sentence": "Wir gehen durch den Park.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "gehen", "preposition": "über", "case": "Akk", "example_sentence": "Das Gespräch geht über Politik.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "mit", "case": "Dat", "example_sentence": "Er kommt mit dem Zug.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "zu", "case": "Dat", "example_sentence": "Kommst du zu mir? Wir kommen zu ihm.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "aus", "case": "Dat", "example_sentence": "Er kommt aus Berlin.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "in", "case": "Akk", "example_sentence": "Er kommt in die Schule.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "auf", "case": "Akk", "example_sentence": "Er kommt auf die Idee.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "nach", "case": "Dat", "example_sentence": "Komm nach Hause!", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "gegen", "case": "Akk", "example_sentence": "Das kommt gegen die Regeln.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "um", "case": "Akk", "example_sentence": "Er kommt um die Ecke.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "unter", "case": "Akk", "example_sentence": "Das Kind kommt unter den Tisch.", "frequency_score": 0.5, "source_corpus": "dwds"}
+{"verb_lemma": "kommen", "preposition": "zwischen", "case": "Akk", "example_sentence": "Die Frage kommt zwischen Tür und Angel.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "mit", "case": "Dat", "example_sentence": "Er fährt mit dem Auto.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "nach", "case": "Dat", "example_sentence": "Wir fahren nach Berlin.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "in", "case": "Akk", "example_sentence": "Sie fährt in die Stadt.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "auf", "case": "Akk", "example_sentence": "Er fährt auf das Meer hinaus.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "um", "case": "Akk", "example_sentence": "Der Zug fährt um den See.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "gegen", "case": "Akk", "example_sentence": "Er fährt gegen den Baum.", "frequency_score": 0.5, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "über", "case": "Akk", "example_sentence": "Das Auto fährt über die Brücke.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "an", "case": "Dat", "example_sentence": "Der Zug fährt an dem Haus vorbei.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "bei", "case": "Dat", "example_sentence": "Er fährt bei Rot über die Ampel.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "fahren", "preposition": "aus", "case": "Dat", "example_sentence": "Er fährt aus der Stadt.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "schreiben", "preposition": "an", "case": "Akk", "example_sentence": "Er schreibt einen Brief an seine Mutter.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "schreiben", "preposition": "an", "case": "Dat", "example_sentence": "Er schreibt an seine Mutter.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "schreiben", "preposition": "mit", "case": "Dat", "example_sentence": "Er schreibt mit einem Bleistift.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "schreiben", "preposition": "über", "case": "Akk", "example_sentence": "Das Buch schreibt über den Krieg.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "schreiben", "preposition": "für", "case": "Akk", "example_sentence": "Er schreibt für eine Zeitung.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "schreiben", "preposition": "in", "case": "Akk", "example_sentence": "Sie schreibt das Wort in das Heft.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "schreiben", "preposition": "von", "case": "Dat", "example_sentence": "Er schreibt von seinen Erlebnissen.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "schreiben", "preposition": "um", "case": "Akk", "example_sentence": "Er schreibt sich um den Verstand.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "lesen", "preposition": "über", "case": "Akk", "example_sentence": "Er liest ein Buch über Geschichte.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "lesen", "preposition": "in", "case": "Dat", "example_sentence": "Er liest in einem Buch.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "lesen", "preposition": "von", "case": "Dat", "example_sentence": "Das Buch liest sich von der ersten bis zur letzten Seite.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "lesen", "preposition": "aus", "case": "Dat", "example_sentence": "Er liest aus der Zeitung vor.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "lesen", "preposition": "bei", "case": "Dat", "example_sentence": "Er liest bei Kerzenlicht.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "lesen", "preposition": "gegen", "case": "Akk", "example_sentence": "Er liest gegen die Zeit.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "sitzen", "preposition": "an", "case": "Dat", "example_sentence": "Er sitzt am Tisch.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "sitzen", "preposition": "in", "case": "Dat", "example_sentence": "Sie sitzt im Garten.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "sitzen", "preposition": "auf", "case": "Dat", "example_sentence": "Das Buch sitzt auf dem Tisch.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "sitzen", "preposition": "bei", "case": "Dat", "example_sentence": "Er sitzt bei der Familie.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "sitzen", "preposition": "unter", "case": "Dat", "example_sentence": "Wir sitzen unter dem Baum.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "sitzen", "preposition": "über", "case": "Dat", "example_sentence": "Die Wolke sitzt über dem Berg.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "sitzen", "preposition": "vor", "case": "Dat", "example_sentence": "Er sitzt vor dem Fernseher.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "sitzen", "preposition": "neben", "case": "Dat", "example_sentence": "Sie sitzt neben mir.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "stehen", "preposition": "an", "case": "Dat", "example_sentence": "Er steht an der Tür.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "stehen", "preposition": "in", "case": "Dat", "example_sentence": "Er steht im Regen.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "stehen", "preposition": "auf", "case": "Dat", "example_sentence": "Das Buch steht auf dem Regal.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "stehen", "preposition": "vor", "case": "Dat", "example_sentence": "Er steht vor dem Haus.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "stehen", "preposition": "unter", "case": "Dat", "example_sentence": "Der Schirm steht unter dem Tisch.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "stehen", "preposition": "neben", "case": "Dat", "example_sentence": "Der Stuhl steht neben dem Tisch.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "stehen", "preposition": "zu", "case": "Dat", "example_sentence": "Der Name steht zuoberst auf der Liste.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "stehen", "preposition": "für", "case": "Akk", "example_sentence": "ABK steht für Auslandskrankenversicherung.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "stellen", "preposition": "auf", "case": "Akk", "example_sentence": "Er stellt die Vase auf den Tisch.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "stellen", "preposition": "in", "case": "Akk", "example_sentence": "Sie stellt das Kind in die Ecke.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "stellen", "preposition": "unter", "case": "Akk", "example_sentence": "Er stellt den Schirm unter den Tisch.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "stellen", "preposition": "vor", "case": "Akk", "example_sentence": "Er stellt mir eine Frage.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "stellen", "preposition": "an", "case": "Akk", "example_sentence": "Er stellt einen Antrag an die Behörde.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "stellen", "preposition": "zu", "case": "Dat", "example_sentence": "Das stellt mich zum Narren.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "legen", "preposition": "auf", "case": "Akk", "example_sentence": "Er legt das Buch auf den Tisch.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "legen", "preposition": "in", "case": "Akk", "example_sentence": "Sie legt das Kind in das Bett.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "legen", "preposition": "unter", "case": "Akk", "example_sentence": "Der Hund legt sich unter den Tisch.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "legen", "preposition": "neben", "case": "Akk", "example_sentence": "Er legt das Messer neben die Gabel.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "legen", "preposition": "vor", "case": "Akk", "example_sentence": "Er legt das Dokument vor den Richter.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "legen", "preposition": "an", "case": "Dat", "example_sentence": "Das Land legt an Wert zu.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "setzen", "preposition": "auf", "case": "Akk", "example_sentence": "Er setzt das Kind auf den Stuhl.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "setzen", "preposition": "in", "case": "Akk", "example_sentence": "Sie setzt sich in den Sessel.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "setzen", "preposition": "an", "case": "Dat", "example_sentence": "Er setzt sich an den Tisch.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "setzen", "preposition": "neben", "case": "Akk", "example_sentence": "Er setzt sich neben mich.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "setzen", "preposition": "über", "case": "Akk", "example_sentence": "Er setzt sich über die Regeln hinweg.", "frequency_score": 0.5, "source_corpus": "dwds"}
+{"verb_lemma": "setzen", "preposition": "unter", "case": "Akk", "example_sentence": "Die Sonne setzt sich unter den Horizont.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "nehmen", "preposition": "mit", "case": "Dat", "example_sentence": "Er nimmt das Buch mit in die Schule.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "nehmen", "preposition": "in", "case": "Akk", "example_sentence": "Er nimmt die Herausforderung in Kauf.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "nehmen", "preposition": "auf", "case": "Akk", "example_sentence": "Er nimmt das Kind auf den Arm.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "nehmen", "preposition": "an", "case": "Dat", "example_sentence": "Er nimmt Anteil am Schicksal.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "nehmen", "preposition": "zu", "case": "Dat", "example_sentence": "Er nimmt zu sich.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "nehmen", "preposition": "von", "case": "Dat", "example_sentence": "Er nimmt das Geld von der Bank.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "nehmen", "preposition": "bei", "case": "Dat", "example_sentence": "Er nimmt ein Beispiel bei seinem Bruder.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "bringen", "preposition": "mit", "case": "Dat", "example_sentence": "Er bringt das Geschenk mit zur Party.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "bringen", "preposition": "in", "case": "Akk", "example_sentence": "Er bringt das Buch in die Bibliothek.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "bringen", "preposition": "auf", "case": "Akk", "example_sentence": "Er bringt sie auf die Idee.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "bringen", "preposition": "um", "case": "Akk", "example_sentence": "Er bringt sie um den Verstand.", "frequency_score": 0.5, "source_corpus": "dwds"}
+{"verb_lemma": "bringen", "preposition": "unter", "case": "Akk", "example_sentence": "Er bringt das Kind unter die Decke.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "bringen", "preposition": "von", "case": "Dat", "example_sentence": "Der Wind bringt es von der Küste.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "bringen", "preposition": "zu", "case": "Dat", "example_sentence": "Er bringt sie zum Lachen.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "schicken", "preposition": "an", "case": "Akk", "example_sentence": "Er schickt das Paket an seine Schwester.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "schicken", "preposition": "in", "case": "Akk", "example_sentence": "Er schickt das Kind in die Schule.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "schicken", "preposition": "mit", "case": "Dat", "example_sentence": "Er schickt das Buch mit der Post.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "schicken", "preposition": "zu", "case": "Dat", "example_sentence": "Er schickt sie zu mir.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "schicken", "preposition": "nach", "case": "Dat", "example_sentence": "Er schickt nach dem Arzt.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "holen", "preposition": "aus", "case": "Dat", "example_sentence": "Er holt das Buch aus dem Regal.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "holen", "preposition": "von", "case": "Dat", "example_sentence": "Er holt Wasser aus dem Brunnen.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "holen", "preposition": "in", "case": "Akk", "example_sentence": "Er holt sie ins Auto.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "holen", "preposition": "bei", "case": "Dat", "example_sentence": "Er holt Rat bei seinem Vater.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "holen", "preposition": "zu", "case": "Dat", "example_sentence": "Er holt sie zu sich.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "treffen", "preposition": "mit", "case": "Dat", "example_sentence": "Er trifft sich mit seinen Freunden.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "treffen", "preposition": "auf", "case": "Akk", "example_sentence": "Er trifft auf einen alten Bekannten.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "treffen", "preposition": "in", "case": "Akk", "example_sentence": "Er trifft eine Entscheidung in der Sache.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "treffen", "preposition": "bei", "case": "Dat", "example_sentence": "Er trifft sich bei mir.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "treffen", "preposition": "zu", "case": "Dat", "example_sentence": "Das Bild trifft es auf den Punkt.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "kennen", "preposition": "aus", "case": "Dat", "example_sentence": "Er kennt sie aus der Schule.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "kennen", "preposition": "von", "case": "Dat", "example_sentence": "Er kennt das Buch von seinem Bruder.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "kennen", "preposition": "mit", "case": "Dat", "example_sentence": "Er kennt sich mit Computern aus.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "kennen", "preposition": "bei", "case": "Dat", "example_sentence": "Er kennt sie bei ihrem Namen.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "lernen", "preposition": "von", "case": "Dat", "example_sentence": "Er lernt von seinem Lehrer.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "lernen", "preposition": "mit", "case": "Dat", "example_sentence": "Er lernt mit seinen Freunden.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "lernen", "preposition": "bei", "case": "Dat", "example_sentence": "Er lernt bei seinem Onkel.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "lernen", "preposition": "für", "case": "Akk", "example_sentence": "Er lernt für die Prüfung.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "lernen", "preposition": "aus", "case": "Dat", "example_sentence": "Er lernt aus seinen Fehlern.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "lernen", "preposition": "in", "case": "Dat", "example_sentence": "Er lernt in der Schule.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "lehren", "preposition": "an", "case": "Dat", "example_sentence": "Er lehrt an der Universität.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "lehren", "preposition": "bei", "case": "Dat", "example_sentence": "Er lehrt bei der Bundeswehr.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "lehren", "preposition": "mit", "case": "Dat", "example_sentence": "Er lehrt mit Engagement.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "lehren", "preposition": "von", "case": "Dat", "example_sentence": "Er lehrt von seinen Erfahrungen.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "fragen", "preposition": "bei", "case": "Dat", "example_sentence": "Er fragt bei seiner Mutter nach.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "fragen", "preposition": "nach", "case": "Dat", "example_sentence": "Er fragt nach dem Weg.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "fragen", "preposition": "in", "case": "Akk", "example_sentence": "Er fragt ins Blaue hinein.", "frequency_score": 0.3, "source_corpus": "wiktionary"}
+{"verb_lemma": "fragen", "preposition": "um", "case": "Akk", "example_sentence": "Er fragt um Rat.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "fragen", "preposition": "wegen", "case": "Gen", "example_sentence": "Er fragt wegen der Verspätung.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "fragen", "preposition": "über", "case": "Akk", "example_sentence": "Er fragt über das Wetter.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "glauben", "preposition": "an", "case": "Akk", "example_sentence": "Er glaubt an Gott.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "glauben", "preposition": "an", "case": "Akk", "example_sentence": "Sie glaubt an sich selbst.", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "glauben", "preposition": "von", "case": "Dat", "example_sentence": "Er glaubt von sich.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "glauben", "preposition": "an", "case": "Dat", "example_sentence": "Er glaubt an das Gute im Menschen.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "achten", "preposition": "auf", "case": "Akk", "example_sentence": "Er achtet auf die Details.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "achten", "preposition": "auf", "case": "Akk", "example_sentence": "Sie achtet auf ihre Gesundheit.", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "achten", "preposition": "bei", "case": "Dat", "example_sentence": "Er achtet bei der Auswahl auf die Qualität.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "achten", "preposition": "gegen", "case": "Akk", "example_sentence": "Er achtet das Gesetz gegen Diebstahl.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "achten", "preposition": "mit", "case": "Dat", "example_sentence": "Er achtet mit Respekt.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "träumen", "preposition": "von", "case": "Dat", "example_sentence": "Er träumt von einer besseren Welt.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "träumen", "preposition": "von", "case": "Dat", "example_sentence": "Sie träumt von ihrem Urlaub.", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "träumen", "preposition": "bei", "case": "Dat", "example_sentence": "Er träumt bei Tag.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "träumen", "preposition": "über", "case": "Akk", "example_sentence": "Er träumt über das Abenteuer.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "träumen", "preposition": "in", "case": "Dat", "example_sentence": "Er träumt in der Nacht.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "hoffen", "preposition": "auf", "case": "Akk", "example_sentence": "Er hofft auf ein Wunder.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "hoffen", "preposition": "auf", "case": "Akk", "example_sentence": "Sie hofft auf Regen.", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "hoffen", "preposition": "für", "case": "Akk", "example_sentence": "Er hofft für die Kinder.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "fürchten", "preposition": "um", "case": "Akk", "example_sentence": "Er fürchtet um seine Zukunft.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "fürchten", "preposition": "vor", "case": "Dat", "example_sentence": "Er fürchtet sich vor Spinnen.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "fürchten", "preposition": "für", "case": "Akk", "example_sentence": "Er fürchtet für sein Leben.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "fürchten", "preposition": "um", "case": "Dat", "example_sentence": "Er fürchtet sich um ihn.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "zweifeln", "preposition": "an", "case": "Dat", "example_sentence": "Er zweifelt an ihren Worten.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "zweifeln", "preposition": "an", "case": "Dat", "example_sentence": "Sie zweifelt an sich selbst.", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "zweifeln", "preposition": "über", "case": "Akk", "example_sentence": "Er zweifelt über den Ausgang.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "zweifeln", "preposition": "in", "case": "Akk", "example_sentence": "Er zweifelt in die Zukunft.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "erinnern", "preposition": "an", "case": "Akk", "example_sentence": "Er erinnert sich an den Urlaub.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "erinnern", "preposition": "an", "case": "Akk", "example_sentence": "Das Bild erinnert mich an meine Kindheit.", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "erinnern", "preposition": "bei", "case": "Dat", "example_sentence": "Er erinnert mich bei der Prüfung an den Ausweis.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "erinnern", "preposition": "mit", "case": "Dat", "example_sentence": "Er erinnert mich mit einem Geschenk an den Termin.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "erinnern", "preposition": "gegen", "case": "Akk", "example_sentence": "Er erinnert sie gegen das Vergessen.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "freuen", "preposition": "auf", "case": "Akk", "example_sentence": "Er freut sich auf die Ferien.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "freuen", "preposition": "über", "case": "Akk", "example_sentence": "Er freut sich über das Geschenk.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "freuen", "preposition": "mit", "case": "Dat", "example_sentence": "Er freut sich mit ihr.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "freuen", "preposition": "für", "case": "Akk", "example_sentence": "Er freut sich für sie.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "ärgern", "preposition": "über", "case": "Akk", "example_sentence": "Er ärgert sich über den Lärm.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "ärgern", "preposition": "mit", "case": "Dat", "example_sentence": "Er ärgert sich mit dem Computer.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "ärgern", "preposition": "über", "case": "Dat", "example_sentence": "Das ärgert mich über alle Maßen.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "ärgern", "preposition": "bei", "case": "Dat", "example_sentence": "Er ärgert sich bei der Arbeit.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "wundern", "preposition": "über", "case": "Akk", "example_sentence": "Er wundert sich über das Verhalten.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "wundern", "preposition": "bei", "case": "Dat", "example_sentence": "Er wundert sich bei dem Gedanken.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "wundern", "preposition": "über", "case": "Dat", "example_sentence": "Das wundert mich über die Maßen.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "sich entscheiden", "preposition": "gegen", "case": "Akk", "example_sentence": "Er entscheidet sich gegen den Vorschlag.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "sich entscheiden", "preposition": "für", "case": "Akk", "example_sentence": "Er entscheidet sich für den Vorschlag.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "entscheiden", "preposition": "über", "case": "Akk", "example_sentence": "Er entscheidet über das Thema.", "frequency_score": 0.88, "source_corpus": "dwds"}
+{"verb_lemma": "entscheiden", "preposition": "bei", "case": "Dat", "example_sentence": "Er entscheidet bei der Sitzung.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "entscheiden", "preposition": "mit", "case": "Dat", "example_sentence": "Er entscheidet mit der Mehrheit.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "sich entschuldigen", "preposition": "bei", "case": "Dat", "example_sentence": "Er entschuldigt sich bei ihr.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "sich entschuldigen", "preposition": "für", "case": "Akk", "example_sentence": "Er entschuldigt sich für den Fehler.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "entschuldigen", "preposition": "mit", "case": "Dat", "example_sentence": "Er entschuldigt das Verhalten mit Stress.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "entschuldigen", "preposition": "von", "case": "Dat", "example_sentence": "Er entschuldigt sie von der Pflicht.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "sich bedanken", "preposition": "bei", "case": "Dat", "example_sentence": "Er bedankt sich bei ihr für das Geschenk.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "sich bedanken", "preposition": "für", "case": "Akk", "example_sentence": "Er bedankt sich für das Geschenk.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "sich interessieren", "preposition": "für", "case": "Akk", "example_sentence": "Er interessiert sich für Musik.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "sich interessieren", "preposition": "an", "case": "Dat", "example_sentence": "Er interessiert sich an der Kunst.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "interessieren", "preposition": "für", "case": "Akk", "example_sentence": "Das Buch interessiert mich für das Thema.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "interessieren", "preposition": "mit", "case": "Dat", "example_sentence": "Das Buch interessiert mit vielen Bildern.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "sich gewöhnen", "preposition": "an", "case": "Akk", "example_sentence": "Er gewöhnt sich an die neue Umgebung.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "gewöhnen", "preposition": "an", "case": "Dat", "example_sentence": "Er gewöhnt an den neuen Rhythmus.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "gewöhnen", "preposition": "mit", "case": "Dat", "example_sentence": "Er gewöhnt mit der Zeit.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "sich verlassen", "preposition": "auf", "case": "Akk", "example_sentence": "Er verlässt sich auf seine Freunde.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "verlassen", "preposition": "mit", "case": "Dat", "example_sentence": "Er verlässt mit schwerem Herzen.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "verlassen", "preposition": "aus", "case": "Dat", "example_sentence": "Er verlässt aus gutem Grund die Stadt.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "verlassen", "preposition": "in", "case": "Dat", "example_sentence": "Das verlässt sich im Rahmen des Üblichen.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "sich bemühen", "preposition": "um", "case": "Akk", "example_sentence": "Er bemüht sich um eine Stelle.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "bemühen", "preposition": "mit", "case": "Dat", "example_sentence": "Er bemüht sich mit Hingabe.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "bemühen", "preposition": "bei", "case": "Dat", "example_sentence": "Er bemüht sich bei der Arbeit.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "sich beschäftigen", "preposition": "mit", "case": "Dat", "example_sentence": "Er beschäftigt sich mit dem Problem.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "sich beschäftigen", "preposition": "bei", "case": "Dat", "example_sentence": "Er beschäftigt sich bei der Firma.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "beschäftigen", "preposition": "mit", "case": "Dat", "example_sentence": "Das Buch beschäftigt mit vielen Themen.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "sich verhalten", "preposition": "gegen", "case": "Akk", "example_sentence": "Er verhält sich gegen sie grob.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "verhalten", "preposition": "bei", "case": "Dat", "example_sentence": "Er verhält sich bei der Sache ruhig.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "verhalten", "preposition": "mit", "case": "Dat", "example_sentence": "Er verhält sich mit Geduld.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "verhalten", "preposition": "gegenüber", "case": "Dat", "example_sentence": "Er verhält sich gegenüber allen höflich.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "verhalten", "preposition": "gegen", "case": "Dat", "example_sentence": "Er verhält sich gegen den Chef freundlich.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "sich beschweren", "preposition": "bei", "case": "Dat", "example_sentence": "Er beschwert sich bei der Behörde.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "sich beschweren", "preposition": "über", "case": "Akk", "example_sentence": "Er beschwert sich über den Lärm.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "sich beschweren", "preposition": "bei", "case": "Akk", "example_sentence": "Er beschwert sich bei der Behörde über den Lärm.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "sorgen", "preposition": "für", "case": "Akk", "example_sentence": "Er sorgt für die Kinder.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "sorgen", "preposition": "für", "case": "Akk", "example_sentence": "Die Polizei sorgt für Ordnung.", "frequency_score": 0.85, "source_corpus": "wiktionary"}
+{"verb_lemma": "sorgen", "preposition": "mit", "case": "Dat", "example_sentence": "Er sorgt mit seiner Aussage für Aufregung.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "sorgen", "preposition": "in", "case": "Dat", "example_sentence": "Er sorgt in der Familie für Frieden.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "sich kümmern", "preposition": "um", "case": "Akk", "example_sentence": "Er kümmert sich um die Kinder.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "sich kümmern", "preposition": "um", "case": "Dat", "example_sentence": "Er kümmert sich um das Geschäft.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "sich kümmern", "preposition": "mit", "case": "Dat", "example_sentence": "Er kümmert sich mit dem Problem.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "kümmern", "preposition": "um", "case": "Akk", "example_sentence": "Er kümmert sich um seine Eltern.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "sich streiten", "preposition": "mit", "case": "Dat", "example_sentence": "Er streitet sich mit seinem Bruder.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "sich streiten", "preposition": "über", "case": "Akk", "example_sentence": "Er streitet sich über Geld.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "sich streiten", "preposition": "um", "case": "Akk", "example_sentence": "Er streitet sich um das Erbe.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "streiten", "preposition": "mit", "case": "Dat", "example_sentence": "Er streitet mit Worten.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "streiten", "preposition": "gegen", "case": "Akk", "example_sentence": "Er streitet gegen die Ungerechtigkeit.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "sich unterhalten", "preposition": "mit", "case": "Dat", "example_sentence": "Er unterhält sich mit seinen Freunden.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "sich unterhalten", "preposition": "über", "case": "Akk", "example_sentence": "Er unterhält sich über Politik.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "unterhalten", "preposition": "mit", "case": "Dat", "example_sentence": "Das Buch unterhält mit vielen Witzen.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "unterhalten", "preposition": "von", "case": "Dat", "example_sentence": "Das Buch unterhält von den Abenteuern.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "sich bewerben", "preposition": "um", "case": "Akk", "example_sentence": "Er bewirbt sich um die Stelle.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "sich bewerben", "preposition": "bei", "case": "Dat", "example_sentence": "Er bewirbt sich bei der Firma.", "frequency_score": 0.95, "source_corpus": "dwds"}
+{"verb_lemma": "bewerben", "preposition": "für", "case": "Akk", "example_sentence": "Er bewirbt sich für die Stelle.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "bewerben", "preposition": "mit", "case": "Dat", "example_sentence": "Er bewirbt sich mit einem Anschreiben.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "sich bedienen", "preposition": "mit", "case": "Dat", "example_sentence": "Er bedient sich mit dem Werkzeug.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "sich bedienen", "preposition": "bei", "case": "Dat", "example_sentence": "Er bedient sich bei der Kasse.", "frequency_score": 0.78, "source_corpus": "dwds"}
+{"verb_lemma": "bedienen", "preposition": "mit", "case": "Dat", "example_sentence": "Er bedient das Auto mit der Handbremse.", "frequency_score": 0.4, "source_corpus": "dwds"}
+{"verb_lemma": "bedienen", "preposition": "von", "case": "Dat", "example_sentence": "Er bedient von der Idee.", "frequency_score": 0.3, "source_corpus": "dwds"}
+{"verb_lemma": "ausgehen", "preposition": "von", "case": "Dat", "example_sentence": "Er geht von der Annahme aus.", "frequency_score": 0.92, "source_corpus": "dwds"}
+{"verb_lemma": "ausgehen", "preposition": "mit", "case": "Dat", "example_sentence": "Er geht mit ihr aus.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "ausgehen", "preposition": "in", "case": "Dat", "example_sentence": "Er geht in der Nacht aus.", "frequency_score": 0.65, "source_corpus": "dwds"}
+{"verb_lemma": "ausgehen", "preposition": "auf", "case": "Akk", "example_sentence": "Er geht auf Abenteuer aus.", "frequency_score": 0.45, "source_corpus": "dwds"}
+{"verb_lemma": "ausgehen", "preposition": "gegen", "case": "Akk", "example_sentence": "Das geht gegen das Gesetz.", "frequency_score": 0.55, "source_corpus": "dwds"}
+{"verb_lemma": "arbeiten", "preposition": "mit", "case": "Dat", "example_sentence": "Wir arbeiten mit Konzept.", "frequency_score": 0.85, "source_corpus": "dwds"}
+{"verb_lemma": "arbeiten", "preposition": "gegen", "case": "Akk", "example_sentence": "Wir arbeiten gegen die Verzögerung.", "frequency_score": 0.4, "source_corpus": "dwds"}

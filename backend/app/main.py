@@ -22,11 +22,20 @@ logger = logging.getLogger("lexora.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: ensure schema (Alembic owns migrations), seed corpus if
-    Postgres is empty, and warm the Langfuse client (no tracing yet).
-    Phase 4 wires real observability call sites."""
-    logger.info("startup: ensuring schema via Base.metadata.create_all")
-    models.Base.metadata.create_all(bind=engine)
+    """Startup: ensure schema via Alembic, seed corpus if Postgres is
+    empty, and warm the Langfuse client (no tracing yet). Phase 4
+    wires real observability call sites.
+
+    Phase 7.1 (card t_96ab949e, Hard rule H4 of PHASE-7.md):
+    ``Base.metadata.create_all`` is removed. Alembic owns ALL
+    migrations from now on — adding the line back would short-circuit
+    the Phase 7.1 + 7.2 collocation schema additions (the
+    ``create_all`` would create the new tables *before* the Alembic
+    migration ran, making the migration a no-op). The matching
+    entrypoint contract is now ``alembic upgrade head`` against a
+    fresh DB; the lifespan just trusts the schema is there.
+    """
+    logger.info("startup: alembic owns schema migrations (no-op on lifespan)")
     logger.info("startup: seeding corpus from SQLite if Postgres is empty")
     bootstrap.seed_corpus()
     logger.info("startup: warming Langfuse client (Phase 4 will use it)")

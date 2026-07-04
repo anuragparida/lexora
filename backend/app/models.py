@@ -1,4 +1,5 @@
 from datetime import datetime
+import sqlalchemy as sa
 from sqlalchemy import (
     Column,
     Integer,
@@ -346,3 +347,121 @@ class DiagnosticSession(Base):
     # ``user`` is provided by the ``backref="user"`` on
     # ``User.diagnostic_sessions`` (declared above) — no explicit
     # relationship is declared here to avoid a name collision.
+
+
+class Collocation(Base):
+    """Phase 7.1 (card t_96ab949e) — curated collocation rows.
+
+    A *collocation* is a frequent word-pair or short phrase: a
+    *headword* (looked up via FK to ``words.id``) plus a
+    *partner_lemma* that co-occurs with it. Example: the German
+    headword ``Entscheidung`` (decision) collocates strongly with
+    the verb ``treffen`` (to make) — yielding the phrase
+    *eine Entscheidung treffen*.
+
+    The table is **read-only at runtime** (Hard rule #2 of
+    PHASE-7.md). The exercise generator (Phase 7.2) consumes it;
+    it never writes back. The only write paths outside Alembic
+    are the seed scripts (``backend/scripts/seed_collocations.py``)
+    and a hand-curated DWDS / Wiktionary subset shipped as
+    ``backend/app/seeds/collocations_seed.json``.
+
+    Columns mirror the card body exactly:
+
+    - ``collocation_id`` — autoincrement PK.
+    - ``headword_id`` — FK to ``words.id`` (the *anchor* word of
+      the collocation). ``ondelete=SET NULL`` so a future word
+      deletion doesn't cascade-wipe the curated row.
+    - ``partner_lemma`` — the co-occurring word (free-form string,
+      not FK — partner lemmas are not necessarily in the corpus).
+    - ``frequency_score`` — Float in [0.0, 1.0] (DWDS-normalized).
+      Not used for ranking yet; reserved for the Phase 9 optimizer.
+    - ``register`` — ``formal`` / ``neutral`` / ``colloquial``.
+      The DB column is loose String; the wire-layer (Pydantic)
+      and the seed-row validator enforce the literal at the
+      application boundary.
+    - ``source_corpus`` — ``dwds`` / ``wiktionary`` / ``manual``.
+      Same dialect-agnostic pattern as ``register``.
+    - ``created_at`` — DB default to ``datetime.utcnow`` so raw-SQL
+      inserts (e.g. ``psql -c "INSERT ..."``) get a sane value
+      without going through SQLAlchemy.
+
+    There is **no** ``updated_at`` column: rows are immutable once
+    seeded (Hard rule #2 — the table is a curated corpus, not a
+    learned one). The seed scripts are the single write path
+    outside Alembic.
+    """
+
+    __tablename__ = "collocations"
+
+    collocation_id = Column(Integer, primary_key=True, index=True)
+    headword_id = Column(
+        Integer,
+        ForeignKey("words.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    partner_lemma = Column(String, nullable=False)
+    frequency_score = Column(Float, nullable=False, default=0.0)
+    register = Column(String, nullable=False)
+    source_corpus = Column(String, nullable=False)
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=sa.func.now(),
+    )
+
+
+class PrepositionalObject(Base):
+    """Phase 7.1 (card t_96ab949e) — curated verb + preposition + case rows.
+
+    A *prepositional object* (German: *Präpositionalobjekt*) is the
+    preposition + case pair a verb governs. Example: ``warten auf
+    + Akk`` — the verb ``warten`` (to wait) takes the preposition
+    ``auf`` in the accusative case, yielding *auf den Zug warten*
+    (to wait for the train).
+
+    Same read-only contract as ``Collocations`` (Hard rule #2):
+    the exercise generator consumes these rows; it never writes
+    back. The seed script
+    (``backend/scripts/seed_prepositional_objects.py``) and the
+    JSON-Lines seed
+    (``backend/app/seeds/prepositional_objects_seed.json``) are the
+    only write paths outside Alembic.
+
+    Columns mirror the card body:
+
+    - ``prepositional_object_id`` — autoincrement PK.
+    - ``verb_lemma`` — the head verb, free-form (not FK — verbs
+      here are lemmas, not always backed by a ``words`` row).
+    - ``preposition`` — the German preposition (e.g. ``auf``,
+      ``mit``, ``über``).
+    - ``case`` — ``Akk`` / ``Dat`` / ``Gen`` — the governed case.
+      Tight String column; Pydantic literal at the wire layer.
+    - ``example_sentence`` — a worked German example showing the
+      verb + preposition + case in context.
+    - ``frequency_score`` — Float in [0.0, 1.0], same shape as
+      ``Collocations.frequency_score``.
+    - ``source_corpus`` — ``dwds`` / ``wiktionary`` / ``manual``.
+    - ``created_at`` — DB default for raw-SQL safety.
+
+    No ``updated_at`` — same immutability invariant as
+    ``Collocations``.
+    """
+
+    __tablename__ = "prepositional_objects"
+
+    prepositional_object_id = Column(Integer, primary_key=True, index=True)
+    verb_lemma = Column(String, nullable=False)
+    preposition = Column(String, nullable=False)
+    case = Column(String, nullable=False)
+    example_sentence = Column(Text, nullable=False)
+    frequency_score = Column(Float, nullable=False, default=0.0)
+    source_corpus = Column(String, nullable=False)
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=sa.func.now(),
+    )
