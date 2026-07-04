@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Literal
 
 
@@ -1028,3 +1028,171 @@ class MatchGenerateRequest(BaseModel):
             "no-RAG fixture so the offline eval stays reproducible."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.1 (card t_96ab949e) — Collocations + PrepositionalObjects schemas
+# ---------------------------------------------------------------------------
+#
+# Wire-level shapes for the two new read-only corpus tables. The
+# underlying SQLAlchemy models live in ``app.models.Collocation`` +
+# ``app.models.PrepositionalObject``; the schemas here are the
+# Pydantic v2 outbound views (Hard rule #4 — Pydantic v2 + Alembic).
+#
+# The literal enums (``register``, ``source_corpus``, ``case``) are
+# the **wire-level guardrails** that prevent typos at the seed
+# boundary (PHASE-7.md gotcha #12). The DB column is a loose String
+# (dialect-agnostic), so a raw-SQL INSERT could in principle smuggle
+# a misspelled value; this Pydantic layer closes that gap. Any future
+# schema change that adds a 4th literal must widen both the Pydantic
+# type AND the seed-row validator AND the test matrix.
+
+# Source-corpus enum: shared by both tables (Hard rule #4).
+SourceCorpus = Literal["dwds", "wiktionary", "manual"]
+
+
+class CollocationOut(BaseModel):
+    """Phase 7.1 — outbound view of a single ``collocations`` row.
+
+    Wire-level fields match the SQLAlchemy model column-for-column.
+    The ``created_at`` field is exposed because some Phase 9
+    audit-style endpoints (not in this card) may want to filter by
+    insertion batch.
+    """
+
+    # Pydantic v2 idiom (replaces the legacy ``class Config`` pattern).
+    # ``from_attributes=True`` lets ``CollocationOut.model_validate(row)``
+    # round-trip from a SQLAlchemy ORM instance without a manual dict
+    # conversion. Mirrors the legacy ``Config`` blocks on the older
+    # Phase 0/1 schemas in this file.
+    model_config = ConfigDict(from_attributes=True)
+
+    collocation_id: int
+    headword_id: Optional[int] = None
+    partner_lemma: str
+    frequency_score: float
+    # Field name ``register_label`` instead of ``register``: the
+    # latter shadows ``BaseModel.register`` (a Pydantic v2 method
+    # used internally for hook registration). ``register_label``
+    # matches the SQLAlchemy model 1:1 visually while staying clear
+    # of the v2 API surface.
+    register_label: Literal["formal", "neutral", "colloquial"] = Field(
+        ..., alias="register", validation_alias="register",
+        serialization_alias="register",
+        description=(
+            "Register of the collocation: formal / neutral / "
+            "colloquial. Pydantic field name is "
+            "``register_label`` to avoid shadowing "
+            "``BaseModel.register``; the wire-level JSON key is "
+            "``register`` for client compatibility."
+        ),
+    )
+    source_corpus: SourceCorpus
+    created_at: datetime
+
+
+class CollocationListOut(BaseModel):
+    """Phase 7.1 — list wrapper for ``CollocationOut`` rows.
+
+    The Phase 7.2 collocation-cloze generator will query this list
+    to enrich the cloze prompt (Hard rule #11 — opt-in flag only).
+    For now the shape is the canonical envelope; later phases may
+    add a ``partner_translation`` field when ``partner_lang="en"``
+    lands.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    items: List[CollocationOut]
+    total: int
+
+
+class CollocationSeedRow(BaseModel):
+    """Phase 7.1 — inbound shape for a single seed-file row.
+
+    Used by ``backend/scripts/seed_collocations.py`` to validate
+    each JSON-Lines row before INSERT. Deliberately omits
+    ``collocation_id`` (autoincrement PK) and ``created_at``
+    (server-side default) — the seed input is the user-authored
+    payload, not the round-trip view.
+
+    The literal enums are the wire-level guardrails (PHASE-7.md
+    gotcha #12): a typo'd ``register`` or ``source_corpus`` value
+    is caught here, at the seed boundary, not later when a row
+    silently propagates into the cloze generator (PHASE-7.2).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    headword_id: Optional[int] = None
+    partner_lemma: str
+    frequency_score: float = Field(..., ge=0.0, le=1.0)
+    # Same rename pattern as ``CollocationOut``: ``register_label``
+    # avoids shadowing Pydantic v2's ``BaseModel.register`` method;
+    # the wire-level JSON key is ``register``.
+    register_label: Literal["formal", "neutral", "colloquial"] = Field(
+        ..., alias="register", validation_alias="register",
+        serialization_alias="register",
+    )
+    source_corpus: SourceCorpus
+
+
+class PrepositionalObjectOut(BaseModel):
+    """Phase 7.1 — outbound view of a single ``prepositional_objects`` row.
+
+    Wire-level fields match the SQLAlchemy model column-for-column.
+    ``example_sentence`` is exposed because it's the primary teaching
+    surface — the Phase 7.2 collocation module may render the
+    sentence with the preposition blanked out as a cloze variant.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    prepositional_object_id: int
+    verb_lemma: str
+    preposition: str
+    case: Literal["Akk", "Dat", "Gen"]
+    example_sentence: str
+    frequency_score: float
+    source_corpus: SourceCorpus
+    created_at: datetime
+
+
+class PrepositionalObjectListOut(BaseModel):
+    """Phase 7.1 — list wrapper for ``PrepositionalObjectOut`` rows.
+
+    The Phase 7.2 module's prepositional-object cloze variant
+    consumes this list. Same envelope shape as
+    ``CollocationListOut`` so future endpoints can swap one for
+    the other without changing client code.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    items: List[PrepositionalObjectOut]
+    total: int
+
+
+class PrepositionalObjectSeedRow(BaseModel):
+    """Phase 7.1 — inbound shape for a single seed-file row.
+
+    Used by ``backend/scripts/seed_prepositional_objects.py`` to
+    validate each JSON-Lines row before INSERT. Deliberately omits
+    ``prepositional_object_id`` (autoincrement PK) and ``created_at``
+    (server-side default) — the seed input is the user-authored
+    payload, not the round-trip view.
+
+    The literal enums are the wire-level guardrails (PHASE-7.md
+    gotcha #12): a typo'd ``case`` or ``source_corpus`` value is
+    caught here, at the seed boundary, not later when a row
+    silently propagates into the cloze generator (PHASE-7.2).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    verb_lemma: str
+    preposition: str
+    case: Literal["Akk", "Dat", "Gen"]
+    example_sentence: str
+    frequency_score: float = Field(..., ge=0.0, le=1.0)
+    source_corpus: SourceCorpus

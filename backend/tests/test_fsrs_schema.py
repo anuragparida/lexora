@@ -132,7 +132,7 @@ def test_alembic_upgrade_head_is_idempotent_on_sqlite(
 def test_alembic_downgrade_minus_one_reverses_both_ops(
     sqlite_db_path, tmp_path
 ):
-    """``alembic downgrade -1`` cleanly reverses:
+    """``alembic downgrade 003_phase3_diagnostic`` cleanly reverses:
 
     - the ``ix_fsrs_cards_word_id_unique`` unique index
     - the ``grade_logs`` table
@@ -140,6 +140,16 @@ def test_alembic_downgrade_minus_one_reverses_both_ops(
     After the downgrade, the SQLite DB is back at the Phase 3.1
     head (``003_phase3_diagnostic``). A subsequent ``upgrade head``
     re-applies both ops cleanly.
+
+    Phase 7.1 (card t_96ab949e) updated this test from ``-1`` to
+    ``003_phase3_diagnostic`` so it remains revision-stable across
+    future migration additions. With Phase 5.2 + 4.5 + 7.1 on the
+    chain, the alembic head is ``7a2_prepositional_objects_table``;
+    ``downgrade -1`` would only walk back through the Phase 7.1
+    ops, leaving the Phase 5.2 ops intact and breaking the
+    assertion. The explicit-revision form walks the chain past
+    Phase 5.2 + 7.1 to the revision immediately below
+    ``p5a2_unique_fsrs_grade_logs``.
     """
     up = _run_alembic(sqlite_db_path, tmp_path, "upgrade", "head")
     assert up.returncode == 0, up.stderr
@@ -151,19 +161,24 @@ def test_alembic_downgrade_minus_one_reverses_both_ops(
     assert "ix_fsrs_cards_word_id_unique" in insp_pre_down["fsrs_indexes"]
 
     down = _run_alembic(
-        sqlite_db_path, tmp_path, "downgrade", "-1"
+        sqlite_db_path, tmp_path, "downgrade", "003_phase3_diagnostic"
     )
     assert down.returncode == 0, down.stderr
 
-    # Inspect post-state: both ops should be gone after downgrade.
+    # Inspect post-state: both Phase 5.2 ops should be gone after
+    # downgrade. The Phase 7.1 tables are also gone (they sit
+    # above ``p5a2`` in the chain; walking to
+    # ``003_phase3_diagnostic`` walks below ``p5a2``).
     insp_post = _inspect(engine)
     assert "grade_logs" not in insp_post["tables"]
     assert "ix_fsrs_cards_word_id_unique" not in insp_post["fsrs_indexes"]
+    assert "collocations" not in insp_post["tables"]
+    assert "prepositional_objects" not in insp_post["tables"]
     engine.dispose()
 
     # Re-apply — must be a clean re-run. The migration's
     # ``inspect()`` guards see fresh namespace and apply both ops
-    # again. This is the ``downgrade -1 && upgrade head`` smoke
+    # again. This is the ``downgrade && upgrade head`` smoke
     # path from the card acceptance list.
     re_up = _run_alembic(sqlite_db_path, tmp_path, "upgrade", "head")
     assert re_up.returncode == 0, re_up.stderr
@@ -172,6 +187,8 @@ def test_alembic_downgrade_minus_one_reverses_both_ops(
     )
     assert "grade_logs" in insp_final["tables"]
     assert "ix_fsrs_cards_word_id_unique" in insp_final["fsrs_indexes"]
+    assert "collocations" in insp_final["tables"]
+    assert "prepositional_objects" in insp_final["tables"]
 
 
 def _inspect(engine) -> dict:
