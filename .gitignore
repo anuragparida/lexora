@@ -16,6 +16,9 @@ eval/results_*.json
 # per-run ragas_results_<timestamp>.jsonl files are scratch.
 eval/ragas_results_*.jsonl
 eval/ragas_results.jsonl
+# Phase 7.5 retrieval-quality A/B runner. The held-out cloze
+# JSONL is tracked; the per-run directory is scratch.
+eval/retrieval_compare/
 
 # Worktrees (ephemeral)
 wt/
