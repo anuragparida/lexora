@@ -447,43 +447,57 @@ pnpm dev
 | POST | `/exercises/comprehension` | Generate one comprehension exercise (3–5 sentence passage + multiple-choice question; accepts optional `{"enable_rag": bool}` body; Phase 6.4 + Phase 6.5; auth-gated) |
 | POST | `/exercises/grade` | Persist a grade for a generated exercise; `exercise_type` widened to `Literal["cloze", "matching", "comprehension"]` in Phase 6.6 (Phase 5.3 route + Phase 6.6 widening; auth-gated) |
 
-## Limitations (Phase 6)
+## Limitations (Phase 7)
 
-Phase 6 ships the full three-exercise-type study surface with
-retrieval-augmented prompts and a regression-detector eval layer.
-The four honest constraints at this snapshot:
+Phase 7 widens the surface that Phase 6 shipped: collocations +
+prepositional-objects schema + retrieval-quality A/B landed;
+bilingual exercise opt-in (`partner_lang`); bge-m3 alternative
+is a one-env-var swap via `EMBEDDING_MODEL`. The honest
+constraints at this snapshot:
 
-- **RAG-on is opt-in.** Retrieval-augmented prompts are wired on
-  `/exercises/cloze`, `/exercises/match`, and
-  `/exercises/comprehension` via an `enable_rag: bool = False`
-  body field. Default behaviour stays non-RAG so the offline
-  eval stays reproducible for A/B comparison; existing callers
-  see no schema change.
-- **Ragas regression in place.** A Ragas offline runner
-  (`backend/scripts/eval_ragas.py`) scores retrieval + generation
-  against the held-out sets and writes `eval/ragas_results.jsonl`.
-  `--dry-run` exits 0 without contacting the Ragas lib (CI smoke
-  path); `--live` runs the real Ragas library when `RAGAS_API_KEY`
-  is set and the library imports cleanly. The four-metric keyset
-  is `context_precision`, `context_recall`, `faithfulness`,
-  `answer_relevance`; per-metric floors are hard-coded module
-  constants in `backend/app/eval/ragas.py` (Hard rule #9 — no
-  env-derived thresholds).
+- **Retrieval-quality A/B lift (Phase 7.5):** TODO: lift on
+  `context_precision`, `context_recall`, `faithfulness`,
+  `answer_relevance`. The Phase 7.5 A/B runner is
+  `backend/scripts/eval_retrieval_compare.py`; its report lands
+  in `eval/retrieval_compare_report.md` once 7.5 ships. The
+  `RETRIEVAL_MIN_QUALITY_FLOOR` is a hard-coded module constant
+  in `backend/app/eval/retrieval_compare.py` (Hard rule #7 —
+  no env-derived thresholds). Numbers in this row stay as
+  `TODO` placeholders until 7.5 lands on `main`; flip them
+  off the placeholders once `eval/retrieval_compare_report.md`
+  exists.
+- **Phase 7 schema-curated, not LLM-learned:** collocations +
+  prepositional-objects are hand-curated from DWDS + Wiktionary
+  subsets (≥200 rows each). Generator reads, never writes. No
+  DSPy optimizer path touches these tables; no `INSERT`, no
+  `UPDATE`, no `ON CONFLICT` writes from runtime — the seed
+  scripts in 7.1 are the only path that touches them outside
+  Alembic migrations.
+- **Phase 7 wire-level only:** the matching + cloze
+  `partner_lang="en"` endpoints are exercisable via
+  curl/Postman. Frontend rendering is Phase 9 (study-session
+  mixing). The cloze `collocation=true` flag is the same story
+  — it's a cloze variant that renders inside the existing
+  cloze surface; bilingual exercises render inside the existing
+  match surface. Wire-level ≠ UI.
 - **A/B lift is a regression detector, not the primary signal.**
   The Phase 4.4 hand-labeled cloze judgments (`eval/cloze_judgments.jsonl`,
   80 rows across all 7 clozable word types) remain the primary
   optimization signal for the cloze generator. Ragas lift numbers
   are reported against the v80 cloze set plus the 40-row matching
-  and 40-row comprehension held-out sets; they catch regressions
-  on retrieval + faithfulness changes without supplanting the
-  hand-labeled grader.
+  and 40-row comprehension held-out sets; the Phase 7.5
+  retrieval-quality A/B reports against the same held-out cloze
+  set under the Phase 6.7 Ragas metrics. Both catch regressions
+  without supplanting the hand-labeled grader.
 - **Retrieval-quality disclaimer stands.** Phase 1's retrieval
   relies on whatever embedding model is currently pinned
   (OpenRouter `qwen/qwen3-embedding-8b` as of Phase 1, with the
   original `bge-m3` swap documented as a one-env-var fallback in
-  `NOTES.md`). Phase 6 Ragas makes that quality measurable, not
-  zero — if retrieval quality is poor, the A/B lift will reflect
-  it on `faithfulness` and `context_recall`.
+  `NOTES.md` and now live in `backend/app/embeddings.py` as the
+  `EMBEDDING_MODEL` env var per Phase 1 Hard rule #6). Phase 7.5
+  measures the lift on retrieval + faithfulness; if retrieval
+  quality is poor, the lift reflects it on `faithfulness` and
+  `context_recall`.
 
 ## Generating Anki decks
 
