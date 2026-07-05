@@ -5,35 +5,34 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AuthForm } from '../../components/AuthForm'
 import type { AuthUser, MePayload } from '../../auth'
 
-// Phase 5.6 (card t_f9375354): gate-integration tests.
+// Phase 5.6 (card t_f9375354) + Phase 9.6 (card t_f1c63bfc):
+// gate-integration tests.
 //
-// What we test:
-//   1. User with due cards (200 from /exercises/due)
-//        -> gate navigates to /exercises/due, NOT /diagnostic
-//           or /weakness-profile.
-//   2. User with no due cards + no weakness profile (204)
-//        -> gate falls through to /diagnostic (Phase 3.3 behavior).
-//   3. User with no due cards + weakness profile (204)
-//        -> gate falls through to /weakness-profile (Phase 3.3).
-//   4. /exercises/due returns 401
-//        -> gate falls through to the profile-state branches
-//           (treated as no-due-cards).
-//   5. /exercises/due throws a network error
-//        -> gate falls through to the profile-state branches.
-//   6. /exercises/due returns 204 with axes-empty + state=never
-//        -> gate routes to /diagnostic; the first branch is skipped.
-//   7. /exercises/due returns 204 with axes-empty + state=completed
-//        -> gate routes to /weakness-profile.
+// What we test (Phase 5.6 baseline preserved; Phase 9.6 widens):
+//   1. User with nonzero due_by_type
+//        -> gate navigates to /exercises/session (Phase 9.6 widens
+//           the Phase 5.6 cloze-only /exercises/due branch)
+//   2. User with all-zero due_by_type + no weakness profile
+//        -> gate falls through to /diagnostic (Phase 3.3 behavior)
+//   3. User with all-zero due_by_type + weakness profile
+//        -> gate falls through to /weakness-profile (Phase 3.3)
+//   4. User with NO due_by_type field (pre-9.2 payload) +
+//      axes empty + state=never -> /diagnostic (graceful fallback)
+//   5. Nonzero due_by_type wins over an existing weakness profile
+//      (gate priority order)
+//
+// Why we no longer mock the cloze-only ``getDueCloze`` client:
+//   Phase 9.6 replaces the async ``/exercises/due`` round-trip
+//   with a synchronous read of the ``due_by_type`` dict that
+//   already arrives on ``MePayload``. The gate's network path
+//   is now zero-cost; the only failure mode is "field absent",
+//   which we cover by feeding ``me`` without the dict.
 //
 // We test through AuthForm (the gate's only real caller) rather
 // than `postAuthGate` directly so we also exercise the wiring
 // (the navigate call, the navigate-replace semantics). Pure
-// `postAuthRoute` behaviour is unchanged from Phase 3.3 — we don't
-// retest that here.
-//
-// `vi.mock` runs before imports resolve, so the auth.ts module sees
-// the mocked `login`/`signup`/`getMe` on first import, and the
-// api/due module sees the mocked `getDueCloze`.
+// `postAuthRoute` behaviour is unchanged from Phase 3.3 — we
+// don't retest that here.
 
 vi.mock('../../auth', async () => {
   const actual = await vi.importActual<typeof import('../../auth')>('../../auth')
@@ -45,17 +44,11 @@ vi.mock('../../auth', async () => {
   }
 })
 
-vi.mock('../../api/due', () => ({
-  getDueCloze: vi.fn(),
-}))
-
 import { login, signup, getMe } from '../../auth'
-import { getDueCloze } from '../../api/due'
 
 const mockedLogin = vi.mocked(login)
 const mockedSignup = vi.mocked(signup)
 const mockedGetMe = vi.mocked(getMe)
-const mockedGetDueCloze = vi.mocked(getDueCloze)
 
 // A user object the login/signup responses can carry. The form
 // doesn't read it post-submit — it's just the contract surface.
@@ -73,6 +66,7 @@ const meFreshUser: MePayload = {
   created_at: '2026-07-03T00:00:00Z',
   weakness_profile: null,
   diagnostic_state: 'never',
+  due_by_type: { cloze: 0, matching: 0, comprehension: 0, idiom: 0 },
 }
 
 // A signed-in fixture with a non-empty weakness profile — the
@@ -88,6 +82,7 @@ const meProfileUser: MePayload = {
     updated_at: '2026-07-03T00:00:00Z',
   },
   diagnostic_state: 'applied',
+  due_by_type: { cloze: 0, matching: 0, comprehension: 0, idiom: 0 },
 }
 
 // AuthResponse shape — minimal, the form doesn't introspect it.
@@ -96,18 +91,28 @@ const authResponse = {
   user: userFixture,
 }
 
-// Minimal ClozeExercise payload for the /exercises/due 200 branch.
-// We don't render the body at the gate, but the API client still
-// type-checks it. word_id 42 mirrors the ClozePage test fixture so
-// future debugging is grep-friendly.
-const dueExercise = {
-  sentence_with_blank: 'Der Kandidat ___ den Vertrag.',
-  answer_word_id: 42,
-  distractors: [1042, 2087, 3155] as [number, number, number],
-  difficulty: 'medium' as const,
-  rationale: 'Sentence cues "unterzeichnen" via accusative object.',
-  prompt_template_version: 'cloze-v1',
-  due_from_fsrs: true,
+// A fixture with nonzero due_by_type — the Phase 9.6 widening.
+// Note: ``matching > 0`` is the meaningful case here — a
+// matching-only due count would have been a cloze-only stranding
+// bug under Phase 5.6's gate.
+const meSessionUser: MePayload = {
+  id: 3,
+  email: 'session@example.com',
+  created_at: '2026-07-04T00:00:00Z',
+  weakness_profile: null,
+  diagnostic_state: 'never',
+  due_by_type: { cloze: 0, matching: 2, comprehension: 1, idiom: 0 },
+}
+
+// A pre-Phase-9.2 payload where ``due_by_type`` is absent.
+// The gate must fall through to the legacy branches rather
+// than throw — defence in depth against stale cached logins.
+const meLegacyUser: MePayload = {
+  id: 4,
+  email: 'legacy@example.com',
+  created_at: '2026-07-01T00:00:00Z',
+  weakness_profile: null,
+  diagnostic_state: 'never',
 }
 
 function renderForm(initialPath = '/login') {
@@ -116,7 +121,10 @@ function renderForm(initialPath = '/login') {
       <Routes>
         <Route path="/login" element={<AuthForm mode="login" />} />
         <Route path="/signup" element={<AuthForm mode="signup" />} />
-        <Route path="/exercises/due" element={<div>EXERCISES_DUE_PAGE</div>} />
+        <Route
+          path="/exercises/session"
+          element={<div>EXERCISES_SESSION_PAGE</div>}
+        />
         <Route path="/exercises/cloze" element={<div>EXERCISES_CLOZE_PAGE</div>} />
         <Route path="/diagnostic" element={<div>DIAGNOSTIC_PAGE</div>} />
         <Route path="/weakness-profile" element={<div>WEAKNESS_PROFILE_PAGE</div>} />
@@ -136,15 +144,13 @@ async function submitLoginForm() {
   await user.click(screen.getByRole('button', { name: /^log in$/i }))
 }
 
-describe('AuthForm gate (Phase 5.6 third branch)', () => {
+describe('AuthForm gate (Phase 9.6 widening)', () => {
   beforeEach(() => {
     mockedLogin.mockReset()
     mockedSignup.mockReset()
     mockedGetMe.mockReset()
-    mockedGetDueCloze.mockReset()
     // Default: login succeeds, getMe returns the fresh-user
-    // payload, getDueCloze reports nothing due. Tests override
-    // per-case.
+    // payload. Tests override per-case.
     mockedLogin.mockResolvedValue(authResponse)
     mockedSignup.mockResolvedValue(authResponse)
   })
@@ -153,86 +159,99 @@ describe('AuthForm gate (Phase 5.6 third branch)', () => {
     cleanup()
   })
 
-  it('routes to /exercises/due when /exercises/due returns 200 + a due card', async () => {
-    mockedGetMe.mockResolvedValue(meFreshUser)
-    mockedGetDueCloze.mockResolvedValue({ kind: 'due', exercise: dueExercise })
+  it('routes to /exercises/session when due_by_type has a nonzero sum (Phase 9.6 widening)', async () => {
+    mockedGetMe.mockResolvedValue(meSessionUser)
     renderForm()
     await submitLoginForm()
     await waitFor(() => {
-      expect(screen.getByText('EXERCISES_DUE_PAGE')).toBeInTheDocument()
+      expect(screen.getByText('EXERCISES_SESSION_PAGE')).toBeInTheDocument()
     })
     // Sanity: the gate did NOT route to /diagnostic or
-    // /weakness-profile even though `meFreshUser` would normally
-    // send it there.
+    // /weakness-profile even though ``meSessionUser`` would
+    // normally send it there (profile empty + state=never).
     expect(screen.queryByText('DIAGNOSTIC_PAGE')).not.toBeInTheDocument()
     expect(screen.queryByText('WEAKNESS_PROFILE_PAGE')).not.toBeInTheDocument()
-    // The due-check fires exactly once per login.
-    expect(mockedGetDueCloze).toHaveBeenCalledTimes(1)
   })
 
-  it('falls through to /diagnostic when /exercises/due returns 204 (no due cards, no profile)', async () => {
+  it('routes to /exercises/session when only the matching bucket is nonzero (the cloze-only stranding bug)', async () => {
+    // Under Phase 5.6, a matching-only due count would have
+    // fallen through to the profile branches because the gate
+    // only checked cloze. Phase 9.6 widens this.
+    const meMatchingOnly: MePayload = {
+      ...meFreshUser,
+      due_by_type: { cloze: 0, matching: 3, comprehension: 0, idiom: 0 },
+    }
+    mockedGetMe.mockResolvedValue(meMatchingOnly)
+    renderForm()
+    await submitLoginForm()
+    await waitFor(() => {
+      expect(screen.getByText('EXERCISES_SESSION_PAGE')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('DIAGNOSTIC_PAGE')).not.toBeInTheDocument()
+  })
+
+  it('falls through to /diagnostic when due_by_type is all-zero + no profile', async () => {
     mockedGetMe.mockResolvedValue(meFreshUser)
-    mockedGetDueCloze.mockResolvedValue({ kind: 'no_cards' })
     renderForm()
     await submitLoginForm()
     await waitFor(() => {
       expect(screen.getByText('DIAGNOSTIC_PAGE')).toBeInTheDocument()
     })
-    expect(screen.queryByText('EXERCISES_DUE_PAGE')).not.toBeInTheDocument()
+    expect(screen.queryByText('EXERCISES_SESSION_PAGE')).not.toBeInTheDocument()
     expect(screen.queryByText('WEAKNESS_PROFILE_PAGE')).not.toBeInTheDocument()
   })
 
-  it('falls through to /weakness-profile when /exercises/due returns 204 (no due cards, profile exists)', async () => {
+  it('falls through to /weakness-profile when due_by_type is all-zero + profile exists', async () => {
     mockedGetMe.mockResolvedValue(meProfileUser)
-    mockedGetDueCloze.mockResolvedValue({ kind: 'no_cards' })
     renderForm()
     await submitLoginForm()
     await waitFor(() => {
       expect(screen.getByText('WEAKNESS_PROFILE_PAGE')).toBeInTheDocument()
     })
-    expect(screen.queryByText('EXERCISES_DUE_PAGE')).not.toBeInTheDocument()
+    expect(screen.queryByText('EXERCISES_SESSION_PAGE')).not.toBeInTheDocument()
     expect(screen.queryByText('DIAGNOSTIC_PAGE')).not.toBeInTheDocument()
   })
 
-  it('falls through to /diagnostic when /exercises/due returns 401 (treated as no-due-cards)', async () => {
-    // The API client collapses 401 into `kind: 'no_cards'`. We
-    // verify the gate respects that mapping — a stale or invalid
-    // JWT must not strand the user on a missing route.
-    mockedGetMe.mockResolvedValue(meFreshUser)
-    mockedGetDueCloze.mockResolvedValue({ kind: 'no_cards' })
+  it('falls through to /diagnostic when due_by_type is absent (pre-9.2 payload graceful fallback)', async () => {
+    // A pre-Phase-9.2 backend payload omits due_by_type. The
+    // gate must not throw — it sums to zero and falls through
+    // to the legacy profile branches.
+    mockedGetMe.mockResolvedValue(meLegacyUser)
     renderForm()
     await submitLoginForm()
     await waitFor(() => {
       expect(screen.getByText('DIAGNOSTIC_PAGE')).toBeInTheDocument()
     })
-    expect(screen.queryByText('EXERCISES_DUE_PAGE')).not.toBeInTheDocument()
+    expect(screen.queryByText('EXERCISES_SESSION_PAGE')).not.toBeInTheDocument()
   })
 
-  it('falls through to /diagnostic when /exercises/due throws a network error', async () => {
-    // A network failure (DNS, offline, CORS) is reported as
-    // `kind: 'error'`. The gate treats that the same as 204 —
-    // never strand the user on a broken network blip.
-    mockedGetMe.mockResolvedValue(meFreshUser)
-    mockedGetDueCloze.mockResolvedValue({
-      kind: 'error',
-      message: 'fetch failed',
-    })
+  it('nonzero due_by_type wins over an existing weakness profile (gate priority order)', async () => {
+    // Even with axes non-empty, a nonzero due_by_type routes
+    // the user to /exercises/session. The Phase 3.3 priority
+    // was "axes non-empty -> /weakness-profile"; Phase 9.6's
+    // widening inserts BEFORE that one, so a learner with both
+    // a filled profile AND outstanding cards lands on the
+    // study-session mixer first.
+    const meReturningWithDue: MePayload = {
+      ...meProfileUser,
+      due_by_type: { cloze: 1, matching: 0, comprehension: 0, idiom: 0 },
+    }
+    mockedGetMe.mockResolvedValue(meReturningWithDue)
     renderForm()
     await submitLoginForm()
     await waitFor(() => {
-      expect(screen.getByText('DIAGNOSTIC_PAGE')).toBeInTheDocument()
+      expect(screen.getByText('EXERCISES_SESSION_PAGE')).toBeInTheDocument()
     })
-    expect(screen.queryByText('EXERCISES_DUE_PAGE')).not.toBeInTheDocument()
+    expect(screen.queryByText('WEAKNESS_PROFILE_PAGE')).not.toBeInTheDocument()
   })
 
-  it('signup + fresh profile + 204 still routes to /diagnostic (Phase 3.3 regression)', async () => {
-    // Defensive: the third branch only fires AFTER the user is
-    // authenticated. Signup -> login-shaped token -> getMe -> gate.
-    // A fresh signup must still land on /diagnostic when no due
-    // cards exist (Phase 3.3 behaviour, card body §"Gotchas" #2).
+  it('signup + fresh profile + all-zero due_by_type still routes to /diagnostic (Phase 3.3 regression)', async () => {
+    // Defensive: the new branch only fires AFTER the user is
+    // authenticated. Signup -> login-shaped token -> getMe ->
+    // gate. A fresh signup must still land on /diagnostic when
+    // no due cards exist.
     mockedSignup.mockResolvedValue(authResponse)
     mockedGetMe.mockResolvedValue(meFreshUser)
-    mockedGetDueCloze.mockResolvedValue({ kind: 'no_cards' })
     const user = userEvent.setup()
     renderForm('/signup')
     await user.type(screen.getByLabelText(/email/i), 'new@example.com')
@@ -241,23 +260,6 @@ describe('AuthForm gate (Phase 5.6 third branch)', () => {
     await waitFor(() => {
       expect(screen.getByText('DIAGNOSTIC_PAGE')).toBeInTheDocument()
     })
-    expect(mockedGetDueCloze).toHaveBeenCalledTimes(1)
-  })
-
-  it('due cards win over an existing weakness profile (gate priority order)', async () => {
-    // Even with axes non-empty, a 200 from /exercises/due routes
-    // the user to /exercises/due. The Phase 3.3 priority was
-    // "axes non-empty -> /weakness-profile"; Phase 5.6's new
-    // branch inserts BEFORE that one, so a learner with both a
-    // filled profile AND outstanding cards lands on the study
-    // flow first. This is the entire point of the third branch.
-    mockedGetMe.mockResolvedValue(meProfileUser)
-    mockedGetDueCloze.mockResolvedValue({ kind: 'due', exercise: dueExercise })
-    renderForm()
-    await submitLoginForm()
-    await waitFor(() => {
-      expect(screen.getByText('EXERCISES_DUE_PAGE')).toBeInTheDocument()
-    })
-    expect(screen.queryByText('WEAKNESS_PROFILE_PAGE')).not.toBeInTheDocument()
+    expect(screen.queryByText('EXERCISES_SESSION_PAGE')).not.toBeInTheDocument()
   })
 })

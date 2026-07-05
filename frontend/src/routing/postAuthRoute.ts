@@ -1,9 +1,9 @@
-// Phase 3.3 (card t_ff6fa637) + Phase 5.6 (card t_f9375354):
-// the post-signup first-login gate.
+// Phase 3.3 (card t_ff6fa637) + Phase 5.6 (card t_f9375354) +
+// Phase 9.6 (card t_f1c63bfc): the post-signup first-login gate.
 //
 // Pure-function branch (Phase 3.3, unchanged): given the response
-// from `GET /auth/me`, decide where to land the user when there are
-// NO due cards. This stays in its own file so:
+// from `GET /auth/me`, decide where to land the user when there
+// are NO due cards. This stays in its own file so:
 //   - the routing logic is unit-testable without rendering anything
 //   - the AuthForm / Header / ProtectedRoute can share one source of
 //     truth (today only AuthForm uses it, but a future "load on
@@ -11,45 +11,75 @@
 //
 // Routing rules (from the card body — the spec pseudocode):
 //
-//   axes non-empty                                -> /weakness-profile
-//   axes empty AND state in {never, in_progress}   -> /diagnostic
-//   axes empty AND state in {completed, applied}  -> /weakness-profile
-//     (user has been through the probe or has set
-//      axes manually; respect that decision)
-//
-// The "axes empty AND state = applied" branch is the trickiest: a
-// user can apply a probe, then zero the sliders (PUT empty axes).
-// The naive rule "no axes -> run probe" would re-route them back to
-// /diagnostic on the next sign-in, but they've already made a
-// deliberate choice to set axes manually — the spec is explicit
-// that we must respect that.
+//   sum(due_by_type) > 0                    -> /exercises/session
+//   sum(due_by_type) == 0 AND profile empty -> /diagnostic
+//                                              (per Phase 5.6)
+//   sum(due_by_type) == 0 AND profile set   -> /weakness-profile
+//                                              (per Phase 3.3)
 //
 // "null" weakness_profile is treated as empty (pre-Phase-2.1 user
 // who never loaded the profile page; the server never auto-creates
 // on /auth/me).
 //
-// Phase 5.6 (card t_f9375354) layers a third branch on TOP of this
-// pure-function gate. The new branch fires BEFORE the profile-state
-// branches and is a network call: GET /exercises/due. If the server
-// returns 200 (any card is due), we route to /exercises/due. If it
-// returns 204 / 401 / errors, we fall through to the existing logic.
+// "The 'axes empty AND state = applied' branch is the trickiest:
+// a user can apply a probe, then zero the sliders (PUT empty
+// axes). The naive rule 'no axes -> run probe' would re-route
+// them back to /diagnostic on the next sign-in, but they've
+// already made a deliberate choice to set axes manually — the
+// spec is explicit that we must respect that." — unchanged from
+// Phase 3.3.
 //
-// Why an async wrapper instead of mutating the pure function:
-//   - Phase 3.3's `postAuthRoute(me)` is imported by tests that
-//     pass a hand-built MePayload. Keeping that signature synchronous
-//     preserves those tests and the offline-test guarantee.
-//   - The new wrapper `postAuthGate(me)` is the one AuthForm calls;
-//     it does the due-check then delegates to the pure function.
-//   - The pure function is now an implementation detail of the
-//     wrapper, but it's still exported for tests.
-import type { DiagnosticState, MePayload, WeaknessProfileSummary } from '../auth'
-import { getDueCloze } from '../api/due'
+// ------------------------------------------------------------------------
+// PHASE 6 HARD RULE #11 — DELIBERATE OFFENSE (Phase 9.6)
+// ------------------------------------------------------------------------
+// Phase 6 hard rule #11 said: "the first-login gate stays
+// cloze-only." Phase 9.6 widens this — the gate now reads the
+// full ``due_by_type`` union (cloze + matching + comprehension
+// + idiom) and routes to ``/exercises/session`` whenever ANY
+// type has outstanding cards. This is intentional: the Phase
+// 9 plan delivers a study-session mixer that fuses all four
+// types, and a cloze-only gate would strand users with
+// matching-only due cards on the wrong landing page.
+//
+// The offense is called out here so a future maintainer who
+// re-asserts the Phase 6 hard rule #11 (or a project-policy
+// sweep that assumes gates stay cloze-only) knows it's a
+// deliberate Phase 9 widening, not a regression. See the
+// ``PHASE-9.md`` spec for the plan-level rationale.
+// ------------------------------------------------------------------------
+//
+// Phase 5.6 layered a third branch on TOP of the pure gate
+// (cloze-only ``/exercises/due`` round-trip). Phase 9.6
+// replaces that branch with the union-aware ``due_by_type``
+// read; the legacy pure gate is preserved as the fall-through
+// path. The new shape is:
+//
+//   async postAuthGate(me):
+//     sum > 0          -> /exercises/session (early return)
+//     sum == 0 / undef -> legacy pure gate(me) (fall through)
+//
+// Why the gate stays async: ``due_by_type`` arrives on the
+// ``MePayload`` returned by ``getMe()`` (no extra round-trip),
+// so the gate is now effectively sync on the network layer —
+// we keep the ``async`` signature because the call site
+// (``AuthForm``) is already inside an ``await`` chain, and a
+// future widen-the-payload redesign can re-introduce an
+// endpoint call without rippling through the gate's callers.
 
-export type PostAuthRoute = '/exercises/due' | '/weakness-profile' | '/diagnostic'
+import type {
+  DiagnosticState,
+  MePayload,
+  WeaknessProfileSummary,
+} from '../auth'
+
+export type PostAuthRoute =
+  | '/exercises/session'
+  | '/weakness-profile'
+  | '/diagnostic'
 
 // Phase 3.3's original union — kept for back-compat in the pure
-// function's return type and for tests that import it directly. The
-// new wrapper widens to include '/exercises/due'.
+// function's return type and for tests that import it directly.
+// The widened wrapper returns the broader union above.
 export type PostAuthRouteLegacy = '/weakness-profile' | '/diagnostic'
 
 function isEmptyProfile(
@@ -63,10 +93,27 @@ function isEmptyProfile(
   return Object.keys(profile.axes).length === 0
 }
 
+// Phase 9.6 (card t_f1c63bfc): sum the ``due_by_type`` counts.
+// Defensive against a missing / undefined ``due_by_type`` field
+// (a pre-Phase-9.2 backend that predates the union widening, or
+// a stale cached login payload) — both produce a zero sum and
+// fall through to the legacy pure gate.
+//
+// Note: the backend always emits the dict with all 4 keys at
+// zero on a pre-9.1 legacy schema; the optional ``?`` on the
+// TypeScript type only exists to keep the gate robust against
+// an extremely old cached payload. The runtime path doesn't
+// need the optional chain in practice.
+function totalDue(me: MePayload): number {
+  const d = me.due_by_type
+  if (d === undefined || d === null) return 0
+  return d.cloze + d.matching + d.comprehension + d.idiom
+}
+
 // Phase 3.3 (card t_ff6fa637): pure-function gate. Decides between
 // /weakness-profile and /diagnostic given only the /auth/me payload.
 // Synchronous so tests can pass a hand-built MePayload without
-// touching the network. The Phase 5.6 async wrapper calls this on
+// touching the network. The Phase 9.6 async wrapper calls this on
 // the fall-through path (no due cards).
 export function postAuthRoute(me: MePayload): PostAuthRouteLegacy {
   if (!isEmptyProfile(me.weakness_profile)) {
@@ -84,30 +131,29 @@ export function postAuthRoute(me: MePayload): PostAuthRouteLegacy {
   return '/weakness-profile'
 }
 
-// Phase 5.6 (card t_f9375354): async gate with the third branch.
+// Phase 9.6 (card t_f1c63bfc): async gate with the union-aware
+// branch.
 //
 // Order of operations (per the card body §"Scope"):
-//   1. GET /exercises/due
-//   2. 200                 -> /exercises/due  (early return)
-//   3. 204 / 401 / error   -> fall through to the legacy pure gate
-//                              using the MePayload we already have.
+//   1. Read ``due_by_type`` from the already-fetched ``MePayload``.
+//   2. sum > 0   -> /exercises/session (early return)
+//   3. sum == 0  -> fall through to the legacy pure gate
+//                   using the MePayload we already have.
 //
 // We deliberately do NOT change the legacy `postAuthRoute` signature
 // (still synchronous, still takes MePayload only). The async gate
-// is a new symbol — AuthForm is the only caller that should use it.
+// is the only symbol `AuthForm` calls; it does the due-check then
+// delegates to the pure function.
 //
-// The `getDueCloze` client swallows network errors into the
-// discriminated `kind: 'error'` branch; the gate treats that the
-// same as `kind: 'no_cards'` (fall through) per the card body's
-// gotcha #3 ("The gate fires on EVERY login, not just first-login"
-// — we want graceful degradation when the due-endpoint is down,
-// not a stuck login form).
+// Phase 5.6's note about graceful degradation still holds: a
+// missing ``due_by_type`` field (network / parsing failure on
+// the wire) is treated as zero sum, which falls through to the
+// legacy branches rather than stranding the user.
 export async function postAuthGate(me: MePayload): Promise<PostAuthRoute> {
-  const due = await getDueCloze()
-  if (due.kind === 'due') {
-    return '/exercises/due'
+  if (totalDue(me) > 0) {
+    return '/exercises/session'
   }
-  // 'no_cards' | 'error' both fall through to the legacy gate.
+  // sum == 0 (or absent) falls through to the legacy pure gate.
   return postAuthRoute(me)
 }
 

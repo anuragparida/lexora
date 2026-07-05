@@ -42,10 +42,22 @@ export interface WeaknessProfileSummary {
   updated_at: string
 }
 
-// Phase 3.3 (card t_ff6fa637): the post-signup first-login gate reads
+// Phase 2.3 (card t_ffe6d6af): the post-signup first-login gate reads
 // `weakness_profile` and `diagnostic_state` from `/auth/me` to decide
 // where to land the user. The `id` / `email` / `created_at` fields
 // are unchanged from Phase 2.3.
+//
+// Phase 9.6 (card t_f1c63bfc) widens the payload with
+// `due_by_type` — a 4-key dict counting due `fsrs_cards` rows
+// of each exercise type (`cloze`, `matching`, `comprehension`,
+// `idiom`). The first-login gate (Phase 9.6, widening Phase 5.6's
+// cloze-only branch) reads the dict total to decide between
+// `/exercises/session` (any nonzero sum) and the legacy
+// profile-state branches. The field is always-present on the
+// wire (the backend defaults to all-zero on a pre-Phase-9.1
+// legacy schema where the `exercise_type` column doesn't
+// exist — see `backend/app/schemas.py::MeOut.due_by_type`), so
+// the frontend never has to null-check the dict.
 export interface MePayload {
   id: number
   email: string
@@ -55,6 +67,30 @@ export interface MePayload {
   // the same as `{axes: {}}`.
   weakness_profile: WeaknessProfileSummary | null
   diagnostic_state: DiagnosticState
+  // Phase 9.6 — per-exercise-type due-card counts. Mirrors
+  // ``backend/app/schemas.py::MeOut.due_by_type``. The closed
+  // 4-key shape lets the gate ``Object.values(due_by_type)
+  //   .reduce((a, b) => a + b, 0)`` without a fallback path.
+  // Optional for backward compatibility with a pre-9.2 cached
+  // payload; the gate treats a missing field as zero sum.
+  due_by_type?: {
+    cloze: number
+    matching: number
+    comprehension: number
+    idiom: number
+  }
+}
+
+// Re-exported shape used by the session gate / SessionPage when
+// they want to *guarantee* `due_by_type` is present (the
+// backend always returns it, but a stale / pre-9.2 payload
+// from a cached login might not). The runtime fetch reads the
+// field defensively and falls back to all-zero on absence.
+export interface DueByTypePayload {
+  cloze: number
+  matching: number
+  comprehension: number
+  idiom: number
 }
 
 // Phase 2.3's `AuthUser` shape — what `signup` / `login` return under
