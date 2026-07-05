@@ -7,6 +7,7 @@
 #
 # Run from the repo root::
 #
+<<<<<<< HEAD
 #     make eval-ragas                       # cloze+matching+comprehension, dry-run
 #     make eval-retrieval-compare           # current vs bge-m3, dry-run
 #     make eval-optimize-match              # offline DSPy optimizer (DummyLM)
@@ -16,6 +17,19 @@
 # + a warm bge-m3 cache for the retrieval compare). Live optimizer
 # runs are gated on the Phase 6.7 Ragas floor (card t_52ef2d50 +
 # card t_bdd9ffbe).
+=======
+#     make eval-ragas                  # cloze+matching+comprehension, dry-run
+#     make eval-retrieval-compare      # current vs bge-m3, dry-run
+#     make eval-optimize-cloze         # Phase 4.4 MIPROv2 optimizer (offline)
+#     make eval-optimize-match         # Phase 9.3 MIPROv2 optimizer (offline)
+#     make eval-optimize-comprehension # Phase 9.4 MIPROv2 optimizer (offline)
+#     make eval-optimize-all           # chain cloze + match + comprehension
+#
+# Or pass --live for the live path (requires OPENROUTER_API_KEY
+# + a warm bge-m3 cache for the retrieval compare). Live-LLM runs
+# for the optimizers are gated on the Phase 6.7 Ragas floor; do
+# not pass --live until that floor is green.
+>>>>>>> origin/perseus/9-4-optimize-comprehension
 
 .PHONY: eval-ragas eval-retrieval-compare \
         eval-optimize-cloze eval-optimize-match eval-optimize-comprehension \
@@ -38,6 +52,7 @@ eval-retrieval-compare:
 	    --judgments ../eval/cloze_judgments.jsonl \
 	    --out ../eval/retrieval_compare/
 
+<<<<<<< HEAD
 # Phase 4.2 — Cloze DSPy optimizer CLI (card t_bdd9ffbe).
 # Offline by default; DummyLM is used unless OPENROUTER_API_KEY is
 # set AND --live is passed. Phase 4.4's optimizer artefact lands at
@@ -54,20 +69,25 @@ eval-optimize-cloze:
 eval-optimize-match:
 	cd backend && uv run python -m scripts.optimize_match
 
-# Phase 9.4 — Comprehension DSPy optimizer CLI (companion card,
-# not yet shipped).
-# Stub entry point that fails fast with a clear pointer; once
-# scripts/optimize_comprehension.py lands, the body flips to
-# match the eval-optimize-match shape line-for-line (card body
-# scope explicitly defers 9.4 to a sibling card).
-eval-optimize-comprehension:
-	@echo "eval-optimize-comprehension: Phase 9.4 not yet shipped." >&2
-	@echo "scripts/optimize_comprehension.py is the companion card; this" >&2
-	@echo "target becomes live in Phase 9.4." >&2
-	@exit 1
+# Phase 4.4 / 9.3 / 9.4 — DSPy prompt optimizers.
+# Default mode (no --live) is the DummyLM offline path so the CLI
+# plumbing runs end-to-end without network. Pass --live only after
+# the Phase 6.7 Ragas floor is green. Each per-type target mirrors
+# the eval-ragas shape (one script invocation, exit code is the
+# gate).
+eval-optimize-cloze:
+	cd backend && uv run python -m scripts.optimize_cloze
 
-# Phase 9 — Run every per-type optimizer. The cloze target predates
-# 9.3 but is wired here for symmetry. The comprehension target is
-# the Phase 9.4 stub above; running ``make eval-optimize-all``
-# before 9.4 lands fails fast on the comprehension step.
-eval-optimize-all: eval-optimize-cloze eval-optimize-match eval-optimize-comprehension
+eval-optimize-match:
+	cd backend && uv run python -m scripts.optimize_match
+
+eval-optimize-comprehension:
+	cd backend && uv run python -m scripts.optimize_comprehension
+
+# Chain cloze + match + comprehension. ``make -k`` keeps going on a
+# per-target failure so one broken script doesn't block the others
+# (the operator inspects each artifact individually anyway).
+eval-optimize-all:
+	$(MAKE) -k eval-optimize-cloze
+	$(MAKE) -k eval-optimize-match
+	$(MAKE) -k eval-optimize-comprehension
