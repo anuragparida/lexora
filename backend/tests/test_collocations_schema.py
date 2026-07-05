@@ -178,68 +178,88 @@ def test_alembic_upgrade_head_is_idempotent_on_sqlite(
 def test_alembic_downgrade_minus_one_reverses_phase_71_ops(
     sqlite_db_path, tmp_path
 ):
-    """``alembic downgrade -1`` cleanly reverses the top of the
-    chain — which is the most recently-added migration. As of
-    Phase 8.1 the top is ``8a1_phrases_table``, so ``-1`` drops
-    the ``phrases`` table.
+    """``alembic downgrade 7a1_collocations_table`` cleanly reverses
+    the Phase 7.1 + 7.2 + 8.1 + 9.1 ops — ``phrases``,
+    ``prepositional_objects``, ``collocations`` tables are dropped
+    AND the ``fsrs_cards.exercise_type`` column + index is
+    reversed. The schema is back at the Phase 5.2 head
+    (``p5a2_unique_fsrs_grade_logs``).
 
-    The Phase 7.1 docstring originally said ``downgrade -1``
-    dropped ``prepositional_objects`` (the head at the time of
-    writing). With Phase 8.1 added, that assertion no longer
-    holds; the test pins the post-state to the expected shape
-    AFTER a target-number-of-steps downgrade to bring the
-    schema back to the Phase 7.1 boundary.
+    Phase 9.1 (card t_0bfdb7ed) updated this test from ``-1`` to
+    an explicit revision target so it remains revision-stable
+    across future migration additions. As of Phase 9.1 the head
+    is ``9a1_fsrs_cards_exercise_type``; ``downgrade -1`` would
+    only walk back through the Phase 9.1 op (dropping the
+    ``exercise_type`` column), leaving the Phase 7.1 + 8.1 ops
+    intact and breaking the assertion. The explicit-revision
+    form walks the chain back past 9.1, 8.1, 7.2, and 7.1 to
+    the revision immediately above ``p5a2``.
 
-    Concretely:
+    Concretely (with Phase 9.1 on the chain):
 
-    - the topmost migration (8.1 = ``phrases`` table) drops on
-      the first ``downgrade -1``.
-    - the next ``downgrade -1`` drops ``prepositional_objects``
-      (Phase 7.1 boundary).
-    - the next ``downgrade -1`` drops ``collocations`` (pre-7.1).
+    - ``9a1_fsrs_cards_exercise_type`` (current head) drops on
+      the first explicit ``downgrade 7a1_collocations_table``
+      step.
+    - ``8a1_phrases_table`` (the ``phrases`` table) drops along
+      the same walk-back.
+    - ``7a2_prepositional_objects_table`` drops next.
+    - ``7a1_collocations_table`` drops next — back to the
+      Phase 5.2 head.
 
     Each step is a clean no-op-on-the-way-down (the migration
-    files' upgrade paths short-circuit when the inspect() guard
-    sees the tables already absent)."""
+    files' downgrade paths inspect() the schema and skip when
+    already absent).
+    """
     up = _run_alembic(sqlite_db_path, tmp_path, "upgrade", "head")
     assert up.returncode == 0, up.stderr
 
     # Inspect mid-state: all 3 corpus tables should be present
-    # after upgrade.
+    # after upgrade, AND the Phase 9.1 column should be on
+    # ``fsrs_cards``.
     engine = create_engine(f"sqlite:///{sqlite_db_path}")
     insp_pre_down = _inspect_tables(engine)
     assert "collocations" in insp_pre_down["tables"]
     assert "prepositional_objects" in insp_pre_down["tables"]
     assert "phrases" in insp_pre_down["tables"]
+    # Phase 9.1: exercise_type column must be present after upgrade.
+    fsrs_columns_pre = {
+        col["name"]
+        for col in inspect(engine).get_columns("fsrs_cards")
+    }
+    assert "exercise_type" in fsrs_columns_pre
 
-    # First ``-1`` drops the head of the chain (8.1 = phrases).
-    down = _run_alembic(sqlite_db_path, tmp_path, "downgrade", "-1")
+    # Walk back past Phase 9.1 + 8.1 + 7.2 + 7.1 to the
+    # Phase 5.2 head (``p5a2_unique_fsrs_grade_logs`` is the
+    # immediate successor of 7a1 in the down direction; the
+    # target is ``p5a2_unique_fsrs_grade_logs`` which is the
+    # Phase 5.2 head — ``downgrade p5a2_unique_fsrs_grade_logs``
+    # walks past 9a1 + 8a1 + 7a2 + 7a1 to land on p5a2).
+    down = _run_alembic(
+        sqlite_db_path, tmp_path, "downgrade", "p5a2_unique_fsrs_grade_logs"
+    )
     assert down.returncode == 0, down.stderr
 
-    # Inspect post-state: phrases should be gone, but the
-    # Phase 7.1 tables should still be there.
+    # Inspect post-state: the Phase 7.1 + 8.1 + 9.1 ops should
+    # all be gone after the downgrade.
     insp_post = _inspect_tables(engine)
     assert "phrases" not in insp_post["tables"]
-    assert "collocations" in insp_post["tables"]
-    assert "prepositional_objects" in insp_post["tables"]
-
-    # Second ``-1`` drops prepositional_objects.
-    down2 = _run_alembic(sqlite_db_path, tmp_path, "downgrade", "-1")
-    assert down2.returncode == 0, down2.stderr
-    insp_after2 = _inspect_tables(engine)
-    assert "prepositional_objects" not in insp_after2["tables"]
-    assert "collocations" in insp_after2["tables"]
-
-    # Third ``-1`` drops collocations.
-    down3 = _run_alembic(sqlite_db_path, tmp_path, "downgrade", "-1")
-    assert down3.returncode == 0, down3.stderr
-    insp_after3 = _inspect_tables(engine)
-    assert "collocations" not in insp_after3["tables"]
-
+    assert "prepositional_objects" not in insp_post["tables"]
+    assert "collocations" not in insp_post["tables"]
+    fsrs_columns_post = {
+        col["name"]
+        for col in inspect(engine).get_columns("fsrs_cards")
+    }
+    assert "exercise_type" not in fsrs_columns_post, (
+        "Phase 9.1 column must be dropped after walking back "
+        "past 9a1. The downgrade is supposed to be "
+        "additive-only in the upgrade direction and reverse "
+        "cleanly in the downgrade direction."
+    )
+    engine.dispose()
 
     # Re-apply — must be a clean re-run. The migrations'
-    # ``inspect()`` guards see fresh namespace and apply both ops
-    # again.
+    # ``inspect()`` guards see fresh namespace and apply all
+    # ops again.
     re_up = _run_alembic(sqlite_db_path, tmp_path, "upgrade", "head")
     assert re_up.returncode == 0, re_up.stderr
     insp_final = _inspect_tables(
@@ -248,7 +268,13 @@ def test_alembic_downgrade_minus_one_reverses_phase_71_ops(
     assert "collocations" in insp_final["tables"]
     assert "prepositional_objects" in insp_final["tables"]
     assert "phrases" in insp_final["tables"]
-    engine.dispose()
+    fsrs_columns_final = {
+        col["name"]
+        for col in inspect(
+            create_engine(f"sqlite:///{sqlite_db_path}")
+        ).get_columns("fsrs_cards")
+    }
+    assert "exercise_type" in fsrs_columns_final
 
 
 def test_postgres_upgrade_head_is_skipped_when_db_url_is_sqlite(
