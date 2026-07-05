@@ -476,62 +476,71 @@ pnpm dev
 | POST | `/exercises/comprehension` | Generate one comprehension exercise (3–5 sentence passage + multiple-choice question; accepts optional `{"enable_rag": bool}` body; Phase 6.4 + Phase 6.5; auth-gated) |
 | POST | `/exercises/grade` | Persist a grade for a generated exercise; `exercise_type` widened to `Literal["cloze", "matching", "comprehension"]` in Phase 6.6 (Phase 5.3 route + Phase 6.6 widening; auth-gated) |
 
-## Limitations (Phase 7)
+## Limitations (Phase 9)
 
-Phase 7 (folded): collocations + prepositional-objects schema
-+ retrieval-quality A/B; bilingual exercise opt-in
-(`partner_lang`); bge-m3 one-env-var swap via `EMBEDDING_MODEL`.
-Builds landed on `main` via commits `ebcb534` (7.1) + `a2447df`
-(7.2) + `a48dd0c` (7.3) + `8b4609d` (7.4) + `4895e94` (7.5); see
-`docs/PHASE-7.md` for the spec. The honest constraints at this
-snapshot:
+Phase 9 (pending fold): frontend study-session UI mixing all
+four exercise types in one flow; matching + comprehension DSPy
+optimizer scripts (mirrors of the Phase 4.4 cloze optimizer);
+widened first-login gate; Alembic migration adding
+`fsrs_cards.exercise_type`. Builds on `perseus/9-*` branches;
+see plan card `t_6e784cf1` for the per-card spec. The honest
+constraints at this snapshot:
 
-- **Retrieval-quality A/B verdict (Phase 7.5):** `no_significant_lift`
-  on `context_precision`, `context_recall`, `faithfulness`,
-  `answer_relevance` for the v80 held-out cloze set. Run
-  `make eval-retrieval-compare` to refresh both per-row CSVs
-  (`eval/retrieval_compare/current_per_row.csv` +
-  `bge_m3_per_row.csv`) and the markdown comparison table
-  (`eval/retrieval_compare/retrieval_compare_report.md`). The
+- **Phase 7.5 retrieval-quality A/B verdict still holds:**
+  `no_significant_lift` between phrase-on and phrase-off on
+  `context_precision`, `context_recall`, `faithfulness`,
+  `answer_relevance` for the v80 held-out cloze set. Phase 9
+  does not re-run the A/B. The Phase 8 phrase-table change is a
+  parallel surface (a new `phrases` table seeded from DWDS
+  Idiome), not a deeper one; the noun-phrase retrieval space is
+  unchanged. Run `make eval-retrieval-compare` to refresh the
+  per-row CSVs (`eval/retrieval_compare/current_per_row.csv` +
+  `bge_m3_per_row.csv`) and the markdown report
+  (`eval/retrieval_compare/retrieval_compare_report.md`); the
   `RETRIEVAL_MIN_QUALITY_FLOOR = 0.05` is a hard-coded module
   constant in `backend/app/eval/retrieval_compare.py` (Hard rule
-  #7 — no env-derived thresholds). The A/B currently runs in
-  dry-run (deterministic-template) mode because OpenRouter's
-  privacy filter blocks `bge-m3` as a chat-model call;
-  `bge-m3` loads from the local `sentence-transformers` cache
-  on a warm HuggingFace pull (~2.3GB on first download).
-- **Phase 7 schema-curated, not LLM-learned:** collocations +
-  prepositional-objects are hand-curated from DWDS + Wiktionary
-  subsets (≥200 rows each). Generator reads, never writes. No
-  DSPy optimizer path touches these tables; no `INSERT`, no
-  `UPDATE`, no `ON CONFLICT` writes from runtime — the seed
-  scripts in 7.1 are the only path that touches them outside
-  Alembic migrations.
-- **Phase 7 wire-level only:** the matching + cloze
-  `partner_lang="en"` endpoints are exercisable via
-  curl/Postman. Frontend rendering is Phase 9 (study-session
-  mixing). The cloze `collocation=true` flag is the same story
-  — it's a cloze variant that renders inside the existing
-  cloze surface; bilingual exercises render inside the existing
-  match surface. Wire-level ≠ UI.
-- **A/B lift is a regression detector, not the primary signal.**
-  The Phase 4.4 hand-labeled cloze judgments (`eval/cloze_judgments.jsonl`,
-  80 rows across all 7 clozable word types) remain the primary
-  optimization signal for the cloze generator. Ragas lift numbers
-  are reported against the v80 cloze set plus the 40-row matching
-  and 40-row comprehension held-out sets; the Phase 7.5
-  retrieval-quality A/B reports against the same held-out cloze
-  set under the Phase 6.7 Ragas metrics. Both catch regressions
-  without supplanting the hand-labeled grader.
-- **Retrieval-quality disclaimer stands.** Phase 1's retrieval
-  relies on whatever embedding model is currently pinned
-  (OpenRouter `qwen/qwen3-embedding-8b` as of Phase 1, with the
-  original `bge-m3` swap documented as a one-env-var fallback in
-  `NOTES.md` and now live in `backend/app/embeddings.py` as the
-  `EMBEDDING_MODEL` env var per Phase 1 Hard rule #6). Phase 7.5
-  measures the lift on retrieval + faithfulness; if retrieval
-  quality is poor, the lift reflects it on `faithfulness` and
-  `context_recall`.
+  #7 — no env-derived thresholds).
+- **Wire-level exercise surface is four types:**
+  `Literal["cloze", "matching", "comprehension", "idiom"]` from
+  Phase 8.3's widening, plus the four `POST /exercises/{type}`
+  endpoints from 6.2, 6.5, 8.4. The schema-curated tables stay
+  hand-curated: collocations + prepositional-objects (7.1) and
+  phrases + phrase-attestations (8.1, 8.2) are written by the
+  seed scripts, never by runtime. No `INSERT`, no `UPDATE`, no
+  `ON CONFLICT` writes from the generators.
+- **Frontend study-session UI at `/exercises/session`:** the
+  mixer page renders one card at a time, picks the next card
+  from the union of `fsrs_cards` where `due_date <= now` filtered
+  by a per-row `exercise_type` (new column, Phase 9.1 Alembic
+  migration). The gate that lands users there is widened:
+  `frontend/src/routing/postAuthRoute.ts` routes to
+  `/exercises/session` (not cloze-only `/exercises/due`) when
+  the user has due cards of *any* type. **This OFFENDS Phase 6
+  hard rule #11** ("the first-login gate stays cloze-only");
+  named here on purpose. The Phase 9 plan card (`t_6e784cf1`)
+  is the documented exception.
+- **DSPy optimizer coverage is three of four.**
+  BootstrapFewShot / MIPROv2 runs against the held-out sets for
+  cloze (Phase 4.4, `scripts/optimize_cloze.py`), matching
+  (Phase 9.3, `scripts/optimize_match.py`), and comprehension
+  (Phase 9.4, `scripts/optimize_comprehension.py`). The idiom
+  path stays unoptimized: a 1-question-per-call generator that
+  doesn't justify the BootstrapFewShot overhead. The three
+  optimizer scripts share the Phase 4.4 template, with the same
+  `DummyLM` discipline, the same offline dry-run default, the
+  same Ragas-floor gate before any live run. Phase 9 mirrors
+  the cloze optimizer 2x; it does not introduce a new DSPy
+  paradigm.
+- **What stayed out of Phase 9 (the honest discipline bar from
+  NOTES.md).** No fifth exercise type. The `Literal` stays at
+  four entries; phrase-to-phrase matching is Phase 10. No
+  in-app audio / IPA / native-speaker sentences. Path B from
+  NOTES.md is its own multi-card phase. No widening of the FSRS
+  algorithm. The Phase 5.3 grade state machine is the surface;
+  preference weights, interval modifiers, and leech detection
+  are deferred. No re-run of the Phase 7.5 A/B. Phase 9 is
+  wiring + UI, not new backend surface; the four generator
+  endpoints stay on their existing wire contract.
 
 ## Generating Anki decks
 
