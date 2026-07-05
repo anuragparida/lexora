@@ -146,24 +146,28 @@ def db_session(sqlite_db_path):
 
 @pytest.fixture
 def fsrs_with_type_column(db_session):
-    """Mimic Phase 9.1 by adding ``fsrs_cards.exercise_type``.
+    """Ensure ``fsrs_cards.exercise_type`` exists in the test DB.
 
-    The model on main (pre-9.1) does NOT declare the column yet.
-    The test SQLAlchemy session is bound to the same engine that
-    the route uses, so an ``ALTER TABLE`` here shows up under
-    ``inspect()`` in the route's reflection probe -- the same
-    posture as ``test_due_queue_widened.py::fsrs_with_type_column``.
+    Phase 9.1 (card t_0bfdb7ed) adds the column to ``app.models``;
+    the model-driven ``Base.metadata.create_all`` then creates it
+    automatically. When 9.7's tests run in isolation (or before
+    9.1 lands on main), the column is missing, so this fixture
+    does an idempotent ``ALTER TABLE`` only if ``PRAGMA
+    table_info(fsrs_cards)`` does not already list it.
 
     Every test in this file requests this fixture: the 4-type
     session mix is meaningless without the union column.
     """
-    db_session.execute(
-        text(
-            "ALTER TABLE fsrs_cards ADD COLUMN exercise_type "
-            "TEXT NOT NULL DEFAULT 'cloze'"
+    rows = db_session.execute(text("PRAGMA table_info(fsrs_cards)")).fetchall()
+    column_names = {row[1] for row in rows}
+    if "exercise_type" not in column_names:
+        db_session.execute(
+            text(
+                "ALTER TABLE fsrs_cards ADD COLUMN exercise_type "
+                "TEXT NOT NULL DEFAULT 'cloze'"
+            )
         )
-    )
-    db_session.commit()
+        db_session.commit()
     return db_session
 
 
