@@ -7,17 +7,6 @@
 #
 # Run from the repo root::
 #
-<<<<<<< HEAD
-#     make eval-ragas                       # cloze+matching+comprehension, dry-run
-#     make eval-retrieval-compare           # current vs bge-m3, dry-run
-#     make eval-optimize-match              # offline DSPy optimizer (DummyLM)
-#     make eval-optimize-all                # cloze + matching + comprehension wrappers
-#
-# Or pass --live for the live path (requires OPENROUTER_API_KEY
-# + a warm bge-m3 cache for the retrieval compare). Live optimizer
-# runs are gated on the Phase 6.7 Ragas floor (card t_52ef2d50 +
-# card t_bdd9ffbe).
-=======
 #     make eval-ragas                  # cloze+matching+comprehension, dry-run
 #     make eval-retrieval-compare      # current vs bge-m3, dry-run
 #     make eval-optimize-cloze         # Phase 4.4 MIPROv2 optimizer (offline)
@@ -29,7 +18,6 @@
 # + a warm bge-m3 cache for the retrieval compare). Live-LLM runs
 # for the optimizers are gated on the Phase 6.7 Ragas floor; do
 # not pass --live until that floor is green.
->>>>>>> origin/perseus/9-4-optimize-comprehension
 
 .PHONY: eval-ragas eval-retrieval-compare \
         eval-optimize-cloze eval-optimize-match eval-optimize-comprehension \
@@ -51,23 +39,6 @@ eval-retrieval-compare:
 	cd backend && uv run python -m scripts.eval_retrieval_compare \
 	    --judgments ../eval/cloze_judgments.jsonl \
 	    --out ../eval/retrieval_compare/
-
-<<<<<<< HEAD
-# Phase 4.2 — Cloze DSPy optimizer CLI (card t_bdd9ffbe).
-# Offline by default; DummyLM is used unless OPENROUTER_API_KEY is
-# set AND --live is passed. Phase 4.4's optimizer artefact lands at
-# backend/app/cloze_optimized.json (gitignored).
-eval-optimize-cloze:
-	cd backend && uv run python -m scripts.optimize_cloze
-
-# Phase 9.3 — Matching DSPy optimizer CLI (card t_52ef2d50).
-# Offline by default; DummyLM is used unless OPENROUTER_API_KEY is
-# set AND --live is passed. Reuses the Phase 6 match_judgments.jsonl
-# held-out set (40 accept rows, template-based per Phase 6 hard
-# rule #8). Optimizer artefact lands at backend/app/match_optimized.json
-# (gitignored).
-eval-optimize-match:
-	cd backend && uv run python -m scripts.optimize_match
 
 # Phase 4.4 / 9.3 / 9.4 — DSPy prompt optimizers.
 # Default mode (no --live) is the DummyLM offline path so the CLI
