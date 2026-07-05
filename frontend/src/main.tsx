@@ -9,6 +9,9 @@ import { WeaknessProfilePage } from './pages/WeaknessProfilePage'
 import { StudyStub } from './pages/StudyStub'
 import { DiagnosticPage } from './pages/DiagnosticPage'
 import { ClozePage } from './pages/ClozePage'
+import { MatchingPage } from './pages/MatchingPage'
+import { ComprehensionPage } from './pages/ComprehensionPage'
+import { IdiomPage } from './pages/IdiomPage'
 import { AuthForm } from './components/AuthForm'
 import { ProtectedRoute } from './components/ProtectedRoute'
 
@@ -86,6 +89,30 @@ createRoot(document.getElementById('root')!).render(
             element={
               <ProtectedRoute>
                 {(user) => <ClozePage user={user} />}
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/exercises/match"
+            element={
+              <ProtectedRoute>
+                {() => <MatchingPage />}
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/exercises/comprehension"
+            element={
+              <ProtectedRoute>
+                {() => <ComprehensionPage />}
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/exercises/idiom"
+            element={
+              <ProtectedRoute>
+                {() => <IdiomPage />}
               </ProtectedRoute>
             }
           />
