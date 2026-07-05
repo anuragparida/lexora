@@ -112,26 +112,30 @@ def db_session(sqlite_db_path):
 
 @pytest.fixture
 def fsrs_with_type_column(db_session):
-    """Mimic Phase 9.1 by adding fsrs_cards.exercise_type to the test DB.
+    """Ensure fsrs_cards.exercise_type exists in the test DB.
 
-    The model in app.models does NOT declare the column yet
-    (9.1 hasn't landed on main). The test SQLAlchemy session is
-    bound to the same engine that the route uses, so an ALTER
-    TABLE here shows up under inspect() in the route's reflection
-    probe.
+    Phase 9.1 (card t_0bfdb7ed) adds the column to ``app.models``;
+    the model-driven ``Base.metadata.create_all`` then creates it
+    automatically. When 9.2's tests run in isolation (or before
+    9.1 lands on main), the column is missing, so this fixture
+    does an idempotent ``ALTER TABLE`` only if ``PRAGMA
+    table_info(fsrs_cards)`` does not already list it.
 
-    Tests that need the column present (tests #1, #3, #5) request
-    this fixture. Tests #2 + the legacy fallback test do not
-    request this fixture -- they exercise the no-column branch
-    explicitly.
+    The route's reflection probe (``inspect(engine).get_columns``)
+    needs the column present for tests #1, #3, #5. Tests #2 + the
+    legacy fallback test do not request this fixture -- they
+    exercise the no-column branch explicitly.
     """
-    db_session.execute(
-        text(
-            "ALTER TABLE fsrs_cards ADD COLUMN exercise_type "
-            "TEXT NOT NULL DEFAULT 'cloze'"
+    rows = db_session.execute(text("PRAGMA table_info(fsrs_cards)")).fetchall()
+    column_names = {row[1] for row in rows}  # PRAGMA returns (cid, name, ...)
+    if "exercise_type" not in column_names:
+        db_session.execute(
+            text(
+                "ALTER TABLE fsrs_cards ADD COLUMN exercise_type "
+                "TEXT NOT NULL DEFAULT 'cloze'"
+            )
         )
-    )
-    db_session.commit()
+        db_session.commit()
     return db_session
 
 
