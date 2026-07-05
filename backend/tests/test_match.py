@@ -42,9 +42,11 @@ Run from ``backend/``::
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import sys
 from datetime import date
+from pathlib import Path
 
 import pytest
 import respx
@@ -1099,6 +1101,237 @@ def test_optimize_match_module_runs_offline(monkeypatch):
             f"optimize_match_module raised on the offline path: {exc!r}"
         )
     assert isinstance(module, match.MatchModule)
+
+
+# ---------------------------------------------------------------------------
+# 10b. optimize_match CLI script (Phase 9.3, card t_52ef2d50)
+#
+# These tests pin the script's contract (slotted between section 10
+# above and the Schema — wire shape below so the section numbers in
+# the existing coverage map stay stable):
+#
+#
+# - DummyLM discipline: the dry-run path uses DummyLM with no
+#   real OpenRouter calls, so the artifact file is written but its
+#   token counters stay at zero.
+# - Comment-header JSONL parser: rows with ``judgment != "accept"``
+#   and ``#``-prefixed comment lines are skipped without crashing
+#   (Hard rule #12 — provenance must remain in the file).
+# - Eval-row projection: the matching JSONL uses
+#   ``target_word`` / ``word_id`` (Phase 6 template-fallback
+#   shape); the script projects them onto the
+#   ``word`` / ``target_word_id`` keys the DSPy ``MatchSignature``
+#   expects. ``context_sentence`` is synthesised from the first
+#   pair; ``count`` is derived from ``len(expected_pairs)``.
+# - Live-mode flag: ``--live`` without an OpenRouter key falls back
+#   to DummyLM, so the same offline guarantee holds.
+# ---------------------------------------------------------------------------
+
+
+def test_optimize_match_help_exits_zero():
+    """``python -m scripts.optimize_match --help`` exits 0 (acceptance
+    criterion mirrored from ``optimize_cloze``)."""
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[2]
+    backend = repo_root / "backend"
+    proc = subprocess.run(
+        [sys.executable, "-m", "scripts.optimize_match", "--help"],
+        cwd=str(backend),
+        capture_output=True,
+        text=True,
+        env={**os.environ, "OPENROUTER_API_KEY": ""},
+        timeout=60,
+    )
+    assert proc.returncode == 0, (
+        f"optimize_match --help exited {proc.returncode}: "
+        f"stderr={proc.stderr!r}"
+    )
+    assert "DummyLM" in proc.stdout or "DummyLM" in proc.stderr
+
+
+def test_optimize_match_eval_loader_projects_target_word_to_word(tmp_path):
+    """The matching eval set rows use ``target_word`` (not ``word``);
+    the script projects them onto the DSPy signature's ``word`` key."""
+    from scripts import optimize_match  # lazy import — see test_cloze.py
+
+    # Build a tiny synthetic JSONL file mirroring the
+    # ``eval/match_judgments.jsonl`` shape. One accept + one reject
+    # + comment-line headers.
+    eval_path = tmp_path / "match_judgments.jsonl"
+    eval_path.write_text(
+        "\n".join(
+            [
+                "# labeler: synthetic",
+                "# provenance: test fixture",
+                json.dumps(
+                    {
+                        "word_id": 1,
+                        "word_type": "Noun",
+                        "target_word": "Hund",
+                        "expected_pairs": [
+                            {
+                                "right_kind": "translation",
+                                "right_word": "dog",
+                                "right_word_id": 2,
+                            },
+                            {
+                                "right_kind": "synonym",
+                                "right_word": "Katze",
+                                "right_word_id": 3,
+                            },
+                            {
+                                "right_kind": "translation",
+                                "right_word": "pet",
+                                "right_word_id": 4,
+                            },
+                        ],
+                        "judgment": "accept",
+                        "labeler": "synthetic",
+                        "provenance": "test fixture",
+                        "rationale": "ok",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "word_id": 9,
+                        "word_type": "Adjective",
+                        "target_word": "lang",
+                        "expected_pairs": [
+                            {
+                                "right_kind": "antonym",
+                                "right_word": "kurz",
+                                "right_word_id": 99,
+                            }
+                        ],
+                        "judgment": "reject",
+                        "labeler": "synthetic",
+                        "provenance": "test fixture",
+                        "rationale": "bad",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = optimize_match._load_eval_set(eval_path)
+    assert len(rows) == 1, "Only the accept row trains; reject is skipped."
+    row = rows[0]
+    # Projection: ``target_word`` → ``word``, ``word_id`` → ``target_word_id``.
+    assert row["word"] == "Hund"
+    assert row["target_word_id"] == 1
+    # ``count`` is derived from ``len(expected_pairs)``.
+    assert row["count"] == 3
+    # ``context_sentence`` is synthesised, never empty.
+    assert row["context_sentence"]
+    # The four MatchSignature inputs are all present.
+    assert set(row.keys()) == {
+        "word",
+        "context_sentence",
+        "learner_axes_json",
+        "target_word_id",
+        "count",
+    }
+
+
+def test_optimize_match_dry_run_writes_artifact_with_zero_tokens(
+    monkeypatch, tmp_path,
+):
+    """The dry-run CLI run writes the artifact file cleanly and the
+    serialized payload records ``mode='dummy'`` plus a token count
+    of zero (Hard rule #8 — no real LLM call)."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    import scripts.optimize_match as optimize_match_mod
+
+    # Point at the real held-out eval set (40 accept rows).
+    repo_root = Path(__file__).resolve().parents[2]
+    eval_path = repo_root / "eval" / "match_judgments.jsonl"
+    assert eval_path.exists(), (
+        f"Expected the Phase 6 eval set at {eval_path}; "
+        "ensure the repo is at the Phase 6 fold."
+    )
+    output_path = tmp_path / "match_optimized.json"
+
+    monkeypatch.setattr(sys, "argv", ["optimize_match"])  # ``--help``-path guard
+
+    # Run main(argv=[...]) explicitly so it doesn't read sys.argv.
+    rc = optimize_match_mod.main(
+        [
+            "--eval-path",
+            str(eval_path),
+            "--output-path",
+            str(output_path),
+        ]
+    )
+    assert rc == 0
+    assert output_path.exists(), "Dry-run must write the artifact file."
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "match-optimized-v1"
+    assert payload["mode"] == "dummy"
+    # 40 accept rows total (per the Phase 6 file); 0.2 val_fraction
+    # gives a 32/8 deterministic split.
+    assert payload["train_count"] == 32
+    assert payload["val_count"] == 8
+    # Hard rule #8: dry-run produces no real LLM calls, so
+    # ``instructions_by_field`` is empty (DummyLM cannot propose
+    # useful instructions). The schema keyset is the contract.
+    assert payload["instructions_by_field"] == {}
+    assert set(payload.keys()) == {
+        "schema_version",
+        "mode",
+        "train_count",
+        "val_count",
+        "instructions_by_field",
+    }
+
+
+def test_optimize_match_live_flag_without_key_falls_back_to_dummy(
+    monkeypatch, tmp_path, caplog,
+):
+    """``--live`` without ``OPENROUTER_API_KEY`` falls back to
+    DummyLM; the artifact still lands on disk and the ``mode``
+    field is ``"dummy"``. Hard rule #8 + the card body's "live-mode
+    is gated on the Phase 6.7 Ragas floor" requirement."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    import scripts.optimize_match as optimize_match_mod
+
+    repo_root = Path(__file__).resolve().parents[2]
+    eval_path = repo_root / "eval" / "match_judgments.jsonl"
+    output_path = tmp_path / "match_optimized_live.json"
+
+    with caplog.at_level("WARNING"):
+        rc = optimize_match_mod.main(
+            [
+                "--eval-path",
+                str(eval_path),
+                "--output-path",
+                str(output_path),
+                "--live",
+            ]
+        )
+
+    assert rc == 0
+    assert output_path.exists()
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["mode"] == "dummy", (
+        "--live with no OPENROUTER_API_KEY must stay offline; "
+        "Hard rule #8 forbids a silent network call."
+    )
+    # The CLI must surface the fallback so an operator doesn't
+    # think they're running a live optimization when they're not.
+    fallback_msgs = [
+        rec.message for rec in caplog.records if "OPENROUTER_API_KEY" in rec.message
+    ]
+    assert fallback_msgs, (
+        "Expected an OPENROUTER_API_KEY warning in the log; "
+        "without it the operator can't tell the flag was a no-op."
+    )
 
 
 # ---------------------------------------------------------------------------
