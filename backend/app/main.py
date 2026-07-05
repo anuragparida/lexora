@@ -478,13 +478,95 @@ def read_me(
             # (``never`` / ``in_progress``).
             diagnostic_state = "completed"
 
+    # Phase 9.2 (card t_e4988202) — ``due_by_type`` payload: count
+    # of due ``fsrs_cards`` rows per exercise type. The frontend's
+    # first-login gate (Phase 9.6) reads this to decide between
+    # cloze-only routing and the union study-session mixer.
+    #
+    # Defensive about the post-9.1 schema: ``fsrs_cards.exercise_type``
+    # may not exist yet on a fresh DB that hasn't run the Phase 9.1
+    # migration. The ``inspect()`` probe returns the live column set
+    # so the route degrades to Phase 5.6's single-user-dev semantics
+    # (``cloze`` count = total; matching/comprehension/idiom = 0) when
+    # the column is missing. Same fallback shape whether the column
+    # has never been added (pre-9.1) or is in the middle of being
+    # migrated (9.1's in-flight branch).
+    due_by_type = _count_due_cards_by_type(db, now=datetime.utcnow())
+
     return schemas.MeOut(
         id=current_user.id,
         email=current_user.email,
         created_at=current_user.created_at,
         weakness_profile=weakness_profile_payload,
         diagnostic_state=diagnostic_state,
+        due_by_type=due_by_type,
     )
+
+
+def _count_due_cards_by_type(db: Session, *, now: datetime) -> dict:
+    """Count due ``fsrs_cards`` rows per exercise type.
+    
+    Phase 9.2 (card t_e4988202). Returns a 4-key dict
+    ``{cloze, matching, comprehension, idiom}`` with counts of rows
+    whose ``due_date <= now``.
+    
+    Phase 9.1 (card t_0bfdb7ed) adds the ``exercise_type`` column;
+    before that migration lands, every ``fsrs_cards`` row is
+    implicitly cloze (Phase 5.6's contract). The function detects
+    the column's presence via ``inspect()`` and degrades to the
+    all-cloze legacy shape on the missing-column branch — the
+    closure dict shape is identical either way, so callers don't
+    need to special-case.
+    
+    Single-user dev assumption (Phase 5): ``fsrs_cards`` has no
+    ``user_id`` column, so the query is global. This matches
+    ``GET /exercises/due``'s documented assumption. Per-user
+    scoping is left for a later phase if it's ever needed.
+    """
+    from sqlalchemy import inspect as _sa_inspect
+
+    counts = {
+        "cloze": 0,
+        "matching": 0,
+        "comprehension": 0,
+        "idiom": 0,
+    }
+    bind = db.get_bind()
+    inspector = _sa_inspect(bind)
+    fsrs_cols = {
+        col["name"] for col in inspector.get_columns("fsrs_cards")
+    }
+    has_type_column = "exercise_type" in fsrs_cols
+
+    if has_type_column:
+        # The model on main (pre-9.1) does NOT declare
+        # `exercise_type`. Use raw SQL via `text()` so the
+        # code survives both schemas. GROUP BY the column
+        # for the per-type counts.
+        from sqlalchemy import text as _sa_text
+
+        rows = db.execute(
+            _sa_text(
+                "SELECT exercise_type, COUNT(id) "
+                "FROM fsrs_cards "
+                "WHERE due_date <= :now "
+                "GROUP BY exercise_type"
+            ),
+            {"now": now},
+        ).all()
+        for etype, n in rows:
+            if etype in counts:
+                counts[etype] = int(n)
+    else:
+        # Legacy schema: every fsrs_cards row is cloze. Bucket
+        # them all under "cloze".
+        n = (
+            db.query(models.FsrsCard)
+            .filter(models.FsrsCard.due_date <= now)
+            .count()
+        )
+        counts["cloze"] = int(n)
+    return counts
 
 
 @app.get(
@@ -1419,19 +1501,27 @@ def generate_idiom_exercise(
 
 
 # ---------------------------------------------------------------------------
-# Phase 5.4 — ``GET /exercises/due`` (card t_e8548d6d)
+# Phase 5.4 / 9.2 — ``GET /exercises/due`` (cards t_e8548d6d, t_e4988202)
 #
 # The closed study loop's right half. Given an authenticated user,
-# return the next cloze they're due to review (FSRS-driven) OR a fresh
-# word they've never seen (first-encounter warm-up).
+# return the next exercise they're due to review (FSRS-driven) OR a
+# fresh word they've never seen (first-encounter warm-up).
+#
+# Phase 9.2 widens the surface to the union of due ``fsrs_cards``
+# rows across all 4 exercise types (``cloze``, ``matching``,
+# ``comprehension``, ``idiom``). The ``type`` query param selects
+# which subset of the union to return — see the route docstring.
 #
 # Wire contract:
 #   - Auth: 401 if no / invalid JWT (raised by ``get_current_user``).
 #   - 204 No Content if no ``fsrs_cards`` rows are due AND no fresh
 #     words exist in the corpus (the user has nothing to study; the
-#     frontend shows an honest empty state).
+#     frontend shows an honest empty state). A 204 also signals a
+#     non-cloze due card — the response carries
+#     ``X-Due-Exercise-Type``/``X-Due-Card-Id`` headers so the
+#     frontend mixer knows which per-type endpoint to call.
 #   - 200 + ``ClozeDueExerciseOut`` (the cloze payload plus a
-#     ``due_from_fsrs: bool`` discriminator) otherwise.
+#     ``due_from_fsrs: bool`` discriminator) for cloze picks.
 #   - 502 if the cloze LLM call fails (transport / persistent schema
 #     violation); 500 on corpus inconsistency (the due-queue picked
 #     a word id that's no longer in the words table).
@@ -1463,15 +1553,42 @@ def generate_idiom_exercise(
 # ---------------------------------------------------------------------------
 
 
-@app.get("/exercises/due", response_model=schemas.ClozeDueExerciseOut)
+@app.get("/exercises/due")
 def get_due_exercise(
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
+    type: Literal["cloze", "matching", "comprehension", "idiom", "any"] = (
+        Query("any")
+    ),
 ) -> Any:
-    """Return the next cloze the authenticated user is due to review.
+    """Return the next exercise the authenticated user is due to review.
 
-    See the section header above for the full wire contract. The
-    two-branch logic is documented inline below.
+    Phase 9.2 (card t_e4988202) widens the surface to the union of
+    due ``fsrs_cards`` rows across all 4 exercise types. The
+    ``type`` query param selects which subset of the union to
+    return:
+
+    - ``type="cloze"`` (or no param on a pre-9.1 legacy schema
+      where the ``fsrs_cards.exercise_type`` column doesn't
+      exist): cloze-only branch — the existing Phase 5.6 /
+      Phase 6.1 / Phase 8.3 contract preserved end-to-end.
+    - ``type="any"`` (default): union of all due cards regardless
+      of exercise type. Picked card's ``exercise_type`` is
+      reflected downstream — cloze -> ``ClozeDueExerciseOut``;
+      matching/comprehension/idiom -> 204 with
+      ``X-Due-Exercise-Type`` and ``X-Due-Card-Id`` headers so
+      the Phase 9.6 frontend mixer knows which per-type endpoint
+      to call (``/exercises/match``, ``/exercises/comprehension``,
+      ``/exercises/idiom``).
+
+    Cross-type generation note: ``app.match`` /
+    ``app.comprehension`` / ``app.idiom`` do NOT expose a
+    ``force_word_id=...`` knob (their word selection is
+    retrieval-aware via the user's weakness profile). The
+    due-queue widens read-side only; inline generation for
+    non-cloze types is deferred to the per-type endpoints and
+    to the Phase 9.6 mixer which reads ``/auth/me.due_by_type``
+    to pick which endpoint to call.
     """
     from app.cloze import (
         ClozeGenerationError,
@@ -1489,16 +1606,38 @@ def get_due_exercise(
     # The query is intentionally global (no user_id filter) per the
     # single-user dev assumption documented in the section header.
     # Tie-break on ``id`` ASC so the deterministic ordering survives
-    # any clock skew between request time and ``due_date``.
-    due_row = (
-        db.query(models.FsrsCard)
-        .filter(models.FsrsCard.due_date <= now)
-        .order_by(
-            models.FsrsCard.due_date.asc(),
-            models.FsrsCard.id.asc(),
-        )
-        .first()
+
+    # Phase 9.2 — pick the earliest-due card matching the union
+    # filter. ``has_type_column`` drives the SQL filter; the
+    # schema fallback for pre-9.1 DBs is documented on
+    # ``_pick_due_fsrs_card``.
+    has_type_column, due_row = _pick_due_fsrs_card(
+        db, now=now, type_filter=type
     )
+    # Non-cloze due card: surface the type to the union consumer
+    # via response headers. The 204 status matches Phase 5.6's
+    # "nothing to render here, look elsewhere" semantics; the
+    # frontend mixer's job is to read the headers and call the
+    # matching per-type endpoint.
+    if due_row is not None:
+        picked_card_type = (
+            getattr(due_row, "exercise_type", "cloze")
+            if has_type_column
+            else "cloze"
+        )
+        if picked_card_type != "cloze":
+            return Response(
+                status_code=204,
+                headers={
+                    "X-Due-Exercise-Type": picked_card_type,
+                    "X-Due-Card-Id": str(due_row.id),
+                    "X-Due-Word-Id": str(due_row.word_id),
+                },
+            )
+
+    # any clock skew between request time and ``due_date``.
+    # (Phase 9.2 moved the SQL to ``_pick_due_fsrs_card`` above
+    # so the union filter can be applied uniformly.)
     if due_row is not None:
         picked_word_id: int = due_row.word_id
         due_from_fsrs = True
@@ -1638,6 +1777,84 @@ def get_due_exercise(
         "latency_ms": latency_ms_due,
         "due_from_fsrs": due_from_fsrs,
     }
+
+
+def _pick_due_fsrs_card(
+    db: Session, *, now: datetime, type_filter: str
+) -> tuple[bool, "models.FsrsCard | None"]:
+    """Phase 9.2 (card t_e4988202) — pick the earliest-due fsrs_cards row.
+
+    Returns ``(has_type_column, due_row)``. ``has_type_column``
+    drives the SQL filter — when the column is missing (pre-9.1
+    schema), the filter is dropped and the legacy Phase 5.6
+    single-user-dev semantics apply (every row is cloze by
+    contract). ``due_row`` is the picked row or ``None`` if no
+    row is due.
+
+    ``type_filter`` is the route's ``type`` query param:
+
+    - ``"cloze"`` → restrict to cloze.
+    - ``"matching"`` / ``"comprehension"`` / ``"idiom"`` →
+      restrict to that single type.
+    - ``"any"`` (or no param) → no restriction, return the
+      globally earliest-due row.
+
+    Same ORDER BY as the Phase 5.6 route (``due_date ASC, id
+    ASC``) so the deterministic ordering survives clock skew
+    between request time and stored ``due_date``.
+    """
+    from sqlalchemy import inspect as _sa_inspect
+
+    bind = db.get_bind()
+    inspector = _sa_inspect(bind)
+    fsrs_cols = {
+        col["name"] for col in inspector.get_columns("fsrs_cards")
+    }
+    has_type_column = "exercise_type" in fsrs_cols
+
+    # The model on main (pre-9.1) does NOT declare
+    # `exercise_type` -- the column exists at the DB layer
+    # only until Phase 9.1 lands. Use raw SQL via `text()` for
+    # the type filter so the code survives both the pre-9.1
+    # schema (no column => has_type_column=False => no filter)
+    # and the post-9.1 schema (column present => raw-SQL filter
+    # applied). The WHERE clause uses no extra index -- the
+    # column-add is a migration scope decision for 9.1.
+    from sqlalchemy import text as _sa_text
+
+    sql = "SELECT * FROM fsrs_cards WHERE due_date <= :now"
+    params = {"now": now}
+    if has_type_column and type_filter != "any":
+        sql += " AND exercise_type = :etype"
+        params["etype"] = type_filter
+    sql += " ORDER BY due_date ASC, id ASC LIMIT 1"
+    result_row = db.execute(_sa_text(sql), params).first()
+    if result_row is None:
+        return has_type_column, None
+
+    # Materialise a thin shim with just the columns the route
+    # actually reads (id, word_id, exercise_type). The ORM
+    # mapped instance would be cleaner, but the column is
+    # not in the mapped attribute set yet (Phase 9.1 hasn't
+    # landed), so SQLAlchemy ORM `query()` would raise.
+    row_dict = dict(result_row._mapping)
+
+    class _FsrsCardShim:
+        __slots__ = ("id", "word_id", "exercise_type")
+
+        def __init__(self, row_id, word_id, exercise_type):
+            self.id = row_id
+            self.word_id = word_id
+            self.exercise_type = exercise_type
+
+    due_row = _FsrsCardShim(
+        row_id=row_dict["id"],
+        word_id=row_dict["word_id"],
+        exercise_type=row_dict.get("exercise_type"),
+    )
+    return has_type_column, due_row
+
+
 
 
 # ---------------------------------------------------------------------------
