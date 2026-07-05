@@ -12,6 +12,7 @@ import { ClozePage } from './pages/ClozePage'
 import { MatchingPage } from './pages/MatchingPage'
 import { ComprehensionPage } from './pages/ComprehensionPage'
 import { IdiomPage } from './pages/IdiomPage'
+import { SessionPage } from './pages/SessionPage'
 import { AuthForm } from './components/AuthForm'
 import { ProtectedRoute } from './components/ProtectedRoute'
 
@@ -27,6 +28,9 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 //   /diagnostic       protected Phase 3.2 multi-step probe
 //   /study            protected placeholder; Phase 5+ fills it in
 //   /exercises/cloze  protected Phase 4.5 minimal cloze surface
+//   /exercises/session protected Phase 9.6 session mixer; lands users
+//                              whose due_by_type union has any
+//                              nonzero bucket (gate widens Phase 5.6)
 //   /exercises/due    protected Phase 5.6 gate-target; mounts
 //                              ClozePage so users with due cards land
 //                              in the actual study flow. Phase 5.5
@@ -113,6 +117,14 @@ createRoot(document.getElementById('root')!).render(
             element={
               <ProtectedRoute>
                 {() => <IdiomPage />}
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/exercises/session"
+            element={
+              <ProtectedRoute>
+                {() => <SessionPage />}
               </ProtectedRoute>
             }
           />
