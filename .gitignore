@@ -60,3 +60,7 @@ backend/generated_decks/
 # every time ``uv run python -m scripts.optimize_cloze`` runs; not
 # a source-of-truth artifact, so it stays out of git history.
 backend/app/cloze_optimized.json
+# Phase 9.3 — matching-optimizer output (card t_52ef2d50). Re-written
+# every time ``uv run python -m scripts.optimize_match`` runs; not
+# a source-of-truth artifact, so it stays out of git history.
+backend/app/match_optimized.json

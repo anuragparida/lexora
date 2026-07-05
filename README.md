@@ -287,6 +287,35 @@ The CLI writes the optimised prompt instructions to
 `backend/app/cloze_optimized.json` (gitignored). The path is
 the production wiring point for Phase 5+.
 
+## Matching DSPy optimizer (Phase 9.3, card t_52ef2d50)
+
+The matching generator's DSPy module is reusable as an offline
+optimizer. Reuses the Phase 6 matching held-out set
+(`eval/match_judgments.jsonl`, 40 accept rows, template-fallback
+per Phase 6 hard rule #8):
+
+```bash
+cd backend
+# Offline — uses DSPy's DummyLM; safe to run on a CI box with
+# no OpenRouter credentials. Mirrors scripts/optimize_cloze.py.
+uv run python -m scripts.optimize_match
+```
+
+The CLI writes the optimised prompt instructions to
+`backend/app/match_optimized.json` (gitignored). The path is
+the production wiring point for Phase 9+. The live mode
+(`--live` + `OPENROUTER_API_KEY`) is gated on the Phase 6.7
+Ragas floor per card scope and is not exercised by this CLI's
+default offline smoke.
+
+Makefile aliases (Phase 9.3 card scope):
+- `make eval-optimize-match` — wraps the offline dry-run above
+  (DummyLM, exit 0, artefact written)
+- `make eval-optimize-all` — runs every per-type optimizer in
+  sequence (cloze + matching + comprehension). The
+  comprehension entry is the Phase 9.4 stub; running
+  `eval-optimize-all` before 9.4 lands fails fast on that step.
+
 ## Matching generation (Phase 6.2 + Phase 6.3)
 
 `POST /exercises/match` returns one concentration-style
