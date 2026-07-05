@@ -60,3 +60,12 @@ backend/generated_decks/
 # every time ``uv run python -m scripts.optimize_cloze`` runs; not
 # a source-of-truth artifact, so it stays out of git history.
 backend/app/cloze_optimized.json
+
+# Phase 9.4 — comprehension optimizer output (card t_56d36f40).
+# Same shape as cloze's: re-written by
+# ``uv run python -m scripts.optimize_comprehension`` on each run;
+# the production path reads the canonical fields on next start,
+# not the artifact bytes themselves, so it stays out of git
+# history. Mirror line added when Phase 9.3's
+# ``backend/app/match_optimized.json`` ships.
+backend/app/comprehension_optimized.json
