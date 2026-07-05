@@ -99,6 +99,33 @@ class FsrsCard(Base):
     flag so SQLAlchemy metadata and the DB agree; the canonical
     constraint is the index, not the SA-level flag (CREATE UNIQUE
     INDEX is portable; ALTER TABLE ADD CONSTRAINT UNIQUE is not).
+
+    Phase 9.1 (card t_0bfdb7ed) adds the ``exercise_type`` column
+    so each card row carries the exercise kind it backs (cloze,
+    matching, comprehension, idiom). Until Phase 9 the column lived
+    only on ``grade_logs``; the card itself was implicitly cloze
+    because Phase 5 was the only exercise kind that read it.
+    Phase 9 widens ``/exercises/due`` (9.2) to a tagged union of
+    exercise kinds, and the scheduler decides "due cloze" vs "due
+    matching" per row — the ``fsrs_cards.exercise_type`` lookup is
+    the join key. Column shape mirrors the Phase 5.2
+    ``grade_logs.exercise_type`` pattern: loose ``String`` on the
+    DB (the wire layer's ``ExerciseType`` literal in
+    ``app/schemas.py`` is the source of truth), ``nullable=False``
+    with a Python-side ``default='cloze'`` for ORM-level inserts
+    AND ``server_default='cloze'`` on the matching Alembic
+    migration so raw-SQL inserts (``psql -c "INSERT ..."``) get a
+    sane value. ``index=True`` on the SA side mirrors the
+    ``ix_fsrs_cards_exercise_type`` index owned by Alembic.
+
+    Hard rule — Alembic owns this column on a fresh DB. The SA
+    declaration below is necessary so the ORM can INSERT/SELECT the
+    column, but on a fresh DB the column is added by the
+    ``9a1_fsrs_cards_exercise_type`` migration, NOT by
+    ``Base.metadata.create_all``. Phase 7.1 (card t_96ab949e)
+    removed ``create_all`` from the ``lifespan``; that invariant
+    stays — see ``test_fsrs_card_exercise_type.py`` for the
+    end-to-end lifespan assertion.
     """
 
     __tablename__ = "fsrs_cards"
@@ -110,6 +137,18 @@ class FsrsCard(Base):
     # backfill scenarios); the constraint still fires on non-null
     # duplicates.
     word_id = Column(Integer, unique=True)
+    # Phase 9.1: see the class docstring. ``default='cloze'`` is the
+    # Python-side mirror of the migration's ``server_default``; it
+    # fires on ORM INSERTs that omit the column so a card created
+    # by Phase 5/6/8 code paths that haven't been updated to pass
+    # ``exercise_type`` explicitly still round-trips. ``index=True``
+    # mirrors the ``ix_fsrs_cards_exercise_type`` Alembic index.
+    exercise_type = Column(
+        String,
+        nullable=False,
+        default="cloze",
+        index=True,
+    )
     difficulty = Column(Float)
     stability = Column(Float)
     retrievability = Column(Float)
