@@ -1501,6 +1501,329 @@ def generate_idiom_exercise(
 
 
 # ---------------------------------------------------------------------------
+# Phase 10.3 — ``POST /exercises/phrase_match`` (card t_13bb48d2)
+#
+# Wire surface for the phrase-match generator (Phase 10.2's
+# ``app.phrase_match.generate_phrase_match``). The route mirrors
+# the 8.4 idiom route shape byte-for-byte: body validation,
+# pair-selector seed resolution, generator call, error
+# translation, response stamping. All prompt + RAG +
+# Langfuse logic lives in ``app.phrase_match``.
+#
+# Wire contract:
+#   - 401: missing / invalid JWT (raised by ``get_current_user``).
+#   - 404: ``word_id`` resolves to no ``phrase_pairs`` row
+#     (raised by ``PhraseMatchNotFoundError`` inside
+#     ``generate_phrase_match`` via ``select_phrase_pair``). The
+#     card body explicitly demands 404 here, not 500.
+#   - 422: Pydantic validation error — missing ``word_id``, or a
+#     malformed ``enable_rag`` type. The closed 4-way
+#     ``relation`` literal + the 5..200 char bound on
+#     ``phrase_a`` / ``phrase_b`` + the comma-joined
+#     ``source_attribution`` literal are all enforced at the
+#     Pydantic layer (``PhraseMatchExerciseOut``). 422 also
+#     fires when the resolved pair has ``phrase_a_id ==
+#     phrase_b_id`` (the card body's "self-pair gate";
+#     defense-in-depth — 10.2's Pydantic layer rejects the
+#     same shape on the input side).
+#   - 422 (pre-flight DB gate): if the resolved ``Phrase`` row
+#     for ``phrase_a_id`` or ``phrase_b_id`` doesn't exist in
+#     the ``phrases`` table → 422 ``{"detail": "phrase X not
+#     found in planted phrases table"}``. Mirrors the 8.4
+#     idiom "no Phrase row exists for word_id=N" pattern.
+#   - 502: LLM transport failure (``LLMError``) or persistent
+#     schema violation (``PhraseMatchGenerationError``). The
+#     body carries the structured fields so an operator can
+#     triage without re-running.
+#   - 500: reserved for unforeseen generator failures
+#     (``corpus inconsistency`` — a row disappeared between
+#     candidate list and lookup).
+#   - 200 + ``PhraseMatchExerciseOut`` otherwise. The
+#     ``exercise_type`` discriminator on the response is
+#     ``"phrase_match"`` (the ``PhraseMatchExerciseOut`` default
+#     narrows the inherited 5-way ``BaseExerciseFields``
+#     literal to ``"phrase_match"``).
+#
+# Hard rule surface (from card body):
+#   - #1 RAG-on is opt-in (read from body, default ``False``).
+#     The route stamps the echoed ``enable_rag`` flag on the
+#     response.
+#   - #2 ``phrase_pairs`` is read-only at runtime. The route
+#     reads ``phrase_pairs`` (via ``select_phrase_pair`` and
+#     the ``enable_rag=True`` nearest-neighbor pull) but never
+#     writes. The seed scripts (10.1) are the only write path.
+#   - #3 ``DummyLM`` discipline — all 10.3 tests pass offline;
+#     CI stays network-free.
+#   - #4 Langfuse lexora project — ``_trace_phrase_match`` from
+#     10.2 wires to the existing ``lexora`` project.
+#   - #5 every state-mutating call is traced —
+#     ``generate_phrase_match`` owns the ``_trace_phrase_match``
+#     call; the route doesn't add a second wrapper.
+#   - #6 ``generate_phrase_match`` is imported lazily inside
+#     the handler so the module-level ``main.py`` stays
+#     import-cheap; we never ``from app.phrase_match import
+#     ...`` at the top of the file.
+#   - #7 ``enable_rag=True`` retrieval uses
+#     ``_retrieve_phrase_pair_neighbors`` from 10.2, which
+#     embeds via local ``app.embeddings.embed_one`` (OpenRouter
+#     ``/embeddings`` HTTP endpoint, NOT a chat call). The
+#     0.55 cosine floor lives at the module constant
+#     ``RAG_COSINE_FLOOR``.
+#   - #8 zero regression on the 4 prior endpoints.
+#     ``BaseExerciseFields`` widening is additive — the route
+#     contract inherits the 5-way.
+#
+# Curl example:
+#
+#     curl -s -X POST http://localhost:18700/exercises/phrase_match \\
+#       -H "Content-Type: application/json" \\
+#       -H "Cookie: lexora_session=$LEXORA_SESSION" \\
+#       -b cookies.txt -c cookies.txt \\
+#       -d '{"word_id": 42}' | jq .
+#
+#     curl -s -X POST http://localhost:18700/exercises/phrase_match \\
+#       -H "Content-Type: application/json" \\
+#       -H "Cookie: lexora_session=$LEXORA_SESSION" \\
+#       -b cookies.txt -c cookies.txt \\
+#       -d '{"word_id": 42, "enable_rag": true}' | jq .
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/exercises/phrase_match",
+    response_model=schemas.PhraseMatchExerciseOut,
+)
+def generate_phrase_match_exercise(
+    payload: schemas.PhraseMatchGenerateRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """Generate one phrase-match exercise for the logged-in learner.
+
+    Body: ``PhraseMatchGenerateRequest`` — ``word_id`` (required,
+    the pair-selector seed) + ``enable_rag`` (default ``False``).
+    The caller picks the integer seed; the route resolves it to
+    a deterministic ``PhrasePair`` row via
+    ``select_phrase_pair`` and forwards the two FK slugs to the
+    generator. There is no ``count`` knob — phrase-match
+    generates one exercise per call (mirrors idiom, not matching).
+
+    The route mirrors the 8.4 idiom endpoint's shape exactly:
+    thin handler, imports ``app.phrase_match`` lazily so
+    module-level ``main.py`` stays import-cheap, locks
+    ``prompt_template_version`` on the way out, stamps a
+    server-minted ``exercise_id`` so the same id re-appears
+    on the future ``grade_logs`` row for Ragas join
+    determinism.
+    """
+    import os
+    import time
+
+    from app.llm import LLMError
+    from app.phrase_match import (
+        PROMPT_TEMPLATE_VERSION,
+        PhraseMatchGenerationError,
+        PhraseMatchNotFoundError,
+        generate_phrase_match,
+        select_phrase_pair,
+    )
+
+    _phrase_match_started = time.perf_counter()
+    try:
+        # Step 1 — resolve the deterministic ``PhrasePair``
+        # row for the requested seed. ``select_phrase_pair``
+        # raises ``PhraseMatchNotFoundError`` when the
+        # ``phrase_pairs`` table is empty (10.1 seed hasn't
+        # run yet); the route catches that and stamps 404.
+        pair = select_phrase_pair(db, payload.word_id)
+
+        # Step 2 — defense-in-depth self-pair gate. The
+        # ``phrase_pairs`` table has a DB CHECK constraint
+        # (10.1) AND the 10.2 Pydantic layer rejects
+        # ``phrase_a_id == phrase_b_id`` on the input side,
+        # but the route pre-flight guarantees the wire shape
+        # even if a future migration relaxes the DB CHECK.
+        # 422 with the card body's structured detail.
+        if pair.phrase_a_id == pair.phrase_b_id:
+            from fastapi import HTTPException  # local: keep module-level cheap
+
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "self_pair_rejected",
+                    "phrase_a_id": pair.phrase_a_id,
+                    "phrase_b_id": pair.phrase_b_id,
+                },
+            )
+
+        # Step 3 — pre-flight DB gate on the resolved FK
+        # slugs. If either ``Phrase`` row doesn't exist in the
+        # planted ``phrases`` table (10.1's seed run was
+        # truncated, or 8.1's seed never landed), the
+        # generator would surface ``PhraseMatchNotFoundError``
+        # with ``word_id=0`` — but the card body asks for an
+        # explicit 422 here so the operator sees a structured
+        # detail naming the missing slug, not a generic 404.
+        from app.phrase_match import Phrase  # local ORM mirror
+
+        for slug, label in (
+            (pair.phrase_a_id, "phrase_a_id"),
+            (pair.phrase_b_id, "phrase_b_id"),
+        ):
+            row = (
+                db.query(Phrase)
+                .filter(Phrase.id == slug)
+                .one_or_none()
+            )
+            if row is None:
+                from fastapi import HTTPException  # local
+
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"phrase {slug!r} not found in planted "
+                        f"phrases table (referenced as {label} "
+                        f"on phrase_pairs row id={pair.id})"
+                    ),
+                )
+
+        # Step 4 — generator call. ``generate_phrase_match``
+        # owns the Langfuse trace + the RAG-on retrieval +
+        # the schema-retry loop; the route just translates
+        # exceptions to HTTP status codes.
+        exercise = generate_phrase_match(
+            db,
+            phrase_a_id=pair.phrase_a_id,
+            phrase_b_id=pair.phrase_b_id,
+            enable_rag=payload.enable_rag,
+        )
+    except PhraseMatchNotFoundError as exc:
+        # 404 — the target ``word_id`` has no ``phrase_pairs``
+        # row (10.1 seed hasn't run yet, or the table was
+        # truncated). Distinct from the comprehension
+        # endpoint's 500 — the card body explicitly demands
+        # 404 for this case (not 500). Mirrors the 8.4 idiom
+        # ``IdiomNotFoundError`` discipline and
+        # ``GET /words/{word_id}``'s own 404 shape.
+        logger.info(
+            "phrase_match: no phrase_pairs row for word_id=%d, "
+            "returning 404",
+            exc.word_id,
+        )
+        from fastapi import HTTPException  # local
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"no phrase_pairs row exists for word_id={exc.word_id}"
+            ),
+        )
+    except LLMError as exc:
+        logger.error(
+            "phrase_match: LLM transport failure for user_id=%d "
+            "word_id=%d enable_rag=%s: %s",
+            current_user.id,
+            payload.word_id,
+            payload.enable_rag,
+            exc,
+        )
+        from fastapi import HTTPException  # local
+
+        raise HTTPException(
+            status_code=502,
+            detail=f"phrase_match generation failed: {exc}",
+        )
+    except PhraseMatchGenerationError as exc:
+        # The trace is already recorded by
+        # ``generate_phrase_match`` before it raises; we
+        # don't call ``_trace_phrase_match`` a second time.
+        # ``exercise`` is unbound in this branch (the
+        # exception fired before the assignment); log the
+        # trace metadata the dead-letter carries instead of
+        # guessing the target.
+        logger.error(
+            "phrase_match: schema dead-letter for user_id=%d "
+            "word_id=%d enable_rag=%s after %d attempt(s): %s",
+            current_user.id,
+            payload.word_id,
+            payload.enable_rag,
+            exc.schema_retry_count,
+            exc.last_validation_error,
+        )
+        from fastapi import HTTPException  # local
+
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "phrase_match_generation_failed",
+                "schema_retry_count": exc.schema_retry_count,
+                "last_validation_error": exc.last_validation_error,
+            },
+        )
+    except ValueError as exc:
+        # Corpus inconsistency — e.g. ``word_id`` resolves
+        # but the row's invariants are broken in the seed
+        # data (race between candidate list and lookup). 500
+        # — operator needs to look at the seed.
+        logger.error(
+            "phrase_match: corpus inconsistency for user_id=%d "
+            "word_id=%d: %s",
+            current_user.id,
+            payload.word_id,
+            exc,
+        )
+        from fastapi import HTTPException  # local
+
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Stamp the wire-only fields: ``exercise_id`` (server-
+    # minted per generation, mirrors the comprehension /
+    # matching / idiom wire shapes for Ragas join
+    # determinism) and ``exercise_type`` (the
+    # ``PhraseMatchExerciseOut`` default already sets this
+    # to ``"phrase_match"``). Lock
+    # ``prompt_template_version`` on the way out so a future
+    # ``generate_phrase_match`` that forgets to set it can't
+    # desync the contract.
+    exercise_id = int.from_bytes(os.urandom(8), "big", signed=True)
+    phrase_match_latency_ms = int(
+        (time.perf_counter() - _phrase_match_started) * 1000
+    )
+
+    # Source attribution stamping — when ``enable_rag=True``,
+    # append ``bge-m3-cosine`` to whatever the LLM picked so
+    # the response correctly attributes RAG-on callers even
+    # when no neighbor rows surfaced (SQLite fallback, empty
+    # corpus, etc.). Token-by-token validator on
+    # ``PhraseMatchExerciseOut._validate_source_attribution``
+    # de-dupes + canonicalizes.
+    source_attr = exercise.source_attribution or ""
+    if payload.enable_rag and "bge-m3-cosine" not in source_attr.split(","):
+        source_attr = (
+            f"{source_attr},bge-m3-cosine"
+            if source_attr
+            else "bge-m3-cosine"
+        )
+
+    return schemas.PhraseMatchExerciseOut.model_validate(
+        {
+            "exercise_id": exercise_id,
+            "target_word_id": payload.word_id,
+            "word_id": payload.word_id,
+            "prompt_template_version": PROMPT_TEMPLATE_VERSION,
+            "enable_rag": payload.enable_rag,
+            "trace_id": None,
+            "latency_ms": phrase_match_latency_ms,
+            "phrase_a": exercise.phrase_a,
+            "phrase_b": exercise.phrase_b,
+            "relation": exercise.relation,
+            "relation_rationale": exercise.relation_rationale,
+            "source_attribution": source_attr,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Phase 5.4 / 9.2 — ``GET /exercises/due`` (cards t_e8548d6d, t_e4988202)
 #
 # The closed study loop's right half. Given an authenticated user,
