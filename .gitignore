@@ -64,4 +64,6 @@ backend/app/cloze_optimized.json
 backend/app/match_optimized.json
 # Phase 9.4 — same shape as cloze_optimized.json, from optimize_comprehension.py
 backend/app/comprehension_optimized.json
+# Phase 10.7 — same shape as cloze_optimized.json, from optimize_phrase_match.py
+backend/app/phrase_match_optimized.json
 frontend/node_modules.root/
