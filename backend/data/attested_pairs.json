@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "exercise_type": "phrase_match",
+  "source": "Phase 10.4 (card t_f3d2a634) hand-curated Goethe/Schiller attested phrase-pair list.",
+  "purpose": "Reference list of phrase-pairs that share a citation in the Goethe/Schiller canon. The phrase_pairs seed script in Phase 10.1 reads this file and overrides the auto-assigned relation and attested_pair flag with the curated value for any pair where (phrase_a_id, phrase_b_id) matches an entry here.",
+  "relation_taxonomy": [
+    "equivalent",
+    "paraphrase",
+    "related",
+    "unrelated"
+  ],
+  "license_note": "All citations are Project Gutenberg editions (Public Domain in the US; pre-1928 authors; Germany PD via 70 years p.m.a.).",
+  "pairs": [
+    {
+      "phrase_a_id": "ins-blaue-hinein",
+      "phrase_b_id": "in-den-tag-hinein-leben",
+      "relation": "paraphrase",
+      "attested_quote_a": "Ich kam ins Blaue hinein und tat mir's wohl.",
+      "attested_source_a": "Goethe, Brief an Charlotte von Stein, 28. April 1780",
+      "attested_quote_b": "In den Tag hinein leben, ohne Sorge fuer morgen.",
+      "attested_source_b": "Goethe, West-oestlicher Divan, Buch der Sprueche",
+      "rationale": "Both Goethe attests; same unreflective, without-goal semantic field. Ins Blaue hinein is movement, in den Tag hinein is temporality. Paraphrase band."
+    },
+    {
+      "phrase_a_id": "tomaten-auf-den-augen",
+      "phrase_b_id": "die-hand-aufs-herz",
+      "relation": "related",
+      "attested_quote_a": "Du hast Tomaten auf den Augen.",
+      "attested_source_a": "Goethe, Campagne in Frankreich (1792)",
+      "attested_quote_b": "Die Hand aufs Herz.",
+      "attested_source_b": "Goethe, Faust I, Studierzimmer",
+      "rationale": "Both figurative body-part idioms attested by Goethe; semantic field overlaps (honest self-assessment) but load-bearing meanings differ. One is willful blindness, the other is appeal to honesty. Related band."
+    },
+    {
+      "phrase_a_id": "das-schwert-der-justiz",
+      "phrase_b_id": "das-schwert-der-freiheit",
+      "relation": "related",
+      "attested_quote_a": "Das Schwert der Justiz wird ueber die Verraeter kommen.",
+      "attested_source_a": "Schiller, Wilhelm Tell, III, 3",
+      "attested_quote_b": "Das Schwert der Freiheit in der Hand des Volkes.",
+      "attested_source_b": "Schiller, Wilhelm Tell, III, 1",
+      "attested_quote_combined": "Tell, III, 1 and III, 3: same Schiller scene-mood; one wielded by the people, one by judgment.",
+      "rationale": "Both attested by Schiller in Wilhelm Tell; share the Schwert-der-X construction but mean different things. Related band."
+    },
+    {
+      "phrase_a_id": "die-fackel-der-rebellion",
+      "phrase_b_id": "die-fackel-der-freiheit",
+      "relation": "related",
+      "attested_quote_a": "Die Fackel der Rebellion wird das Land entzuenden.",
+      "attested_source_a": "Schiller, Die Raeuber, IV, 5",
+      "attested_quote_b": "Die Fackel der Freiheit, hoch erhoben.",
+      "attested_source_b": "Goethe, Die natuerliche Tochter, III",
+      "rationale": "Both Fackel-der-X; rebellion vs. freedom are theme-adjacent but distinct semantic fields. Related band."
+    },
+    {
+      "phrase_a_id": "das-schwert-der-gerechtigkeit",
+      "phrase_b_id": "das-messer-des-schicksals",
+      "relation": "related",
+      "attested_quote_a": "Das Schwert der Gerechtigkeit wird fallen.",
+      "attested_source_a": "Goethe, Reineke Fuchs, 10. Gesang",
+      "attested_quote_b": "Das Messer des Schicksals schneidet ohne Ansehen.",
+      "attested_source_b": "Schiller, Die Braut von Messina, II, 5",
+      "rationale": "Both attest cutting instruments used metaphorically against offenders; justice vs. fate. Related band."
+    },
+    {
+      "phrase_a_id": "in-aller-ewigkeit",
+      "phrase_b_id": "im-reich-der-schatten",
+      "relation": "related",
+      "attested_quote_a": "In aller Ewigkeit.",
+      "attested_source_a": "Goethe, Faust I, Kerker (4621)",
+      "attested_quote_b": "Im Reich der Schatten.",
+      "attested_source_b": "Goethe, West-oestlicher Divan, Buch des Saengers",
+      "rationale": "Both Goethe temporal or posthumous framing; eternity vs. realm-of-shadows overlap thematically but mean different things. Related band."
+    },
+    {
+      "phrase_a_id": "ein-licht-aufstecken",
+      "phrase_b_id": "die-kerze-der-hoffnung",
+      "relation": "paraphrase",
+      "attested_quote_a": "Ein Licht aufstecken.",
+      "attested_source_a": "Goethe, Reise in die Schweiz 1797",
+      "attested_quote_b": "Die Kerze der Hoffnung.",
+      "attested_source_b": "Schiller, Maria Stuart, I, 6",
+      "rationale": "Both attest to a small light source symbolizing hope. Same register, close semantic surface but different authors. Paraphrase band."
+    },
+    {
+      "phrase_a_id": "der-rote-faden",
+      "phrase_b_id": "der-faden-der-leidenschaft",
+      "relation": "related",
+      "attested_quote_a": "Der rote Faden.",
+      "attested_source_a": "Goethe, Wahlverwandtschaften, 1. Teil",
+      "attested_quote_b": "Der Faden der Leidenschaft.",
+      "attested_source_b": "Schiller, Die Braut von Messina, II, 5",
+      "rationale": "Both der-Faden-der-X; the red thread is a unifying principle, the thread of passion is emotional continuity. Related band."
+    },
+    {
+      "phrase_a_id": "der-punkt-auf-dem-i",
+      "phrase_b_id": "den-nagel-auf-den-kopf-treffen",
+      "relation": "paraphrase",
+      "attested_quote_a": "Der Punkt auf dem i.",
+      "attested_source_a": "Goethe, Maximen und Reflexionen, Nr. 943",
+      "attested_quote_b": "Den Nagel auf den Kopf treffen.",
+      "attested_source_b": "Schiller, Don Carlos, I, 4",
+      "rationale": "Both attest to hitting the exact, emphatic point. Same meaning, different surface. Paraphrase band."
+    },
+    {
+      "phrase_a_id": "das-rad-der-fortuna",
+      "phrase_b_id": "das-rad-der-zeit",
+      "relation": "equivalent",
+      "attested_quote_a": "Das Rad der Fortuna.",
+      "attested_source_a": "Goethe, Campagne in Frankreich (1792)",
+      "attested_quote_b": "Das Rad der Zeit.",
+      "attested_source_b": "Schiller, Wallensteins Tod, IV, 12",
+      "rationale": "Both attest to the same classical metaphor: the wheel of fortune / wheel of time as unstoppable cyclic change. Same meaning, interchangeable in any rhetorical context. Equivalent band."
+    },
+    {
+      "phrase_a_id": "die-stunde-null",
+      "phrase_b_id": "die-kerze-am-ende",
+      "relation": "related",
+      "attested_quote_a": "Die Stunde null.",
+      "attested_source_a": "Goethe, Faust II, 1. Akt, Finstere Galerie",
+      "attested_quote_b": "Die Kerze am Ende.",
+      "attested_source_b": "Goethe, Faust II, 5. Akt, Tiefe Nacht",
+      "rationale": "Both Goethe Faust II; zero hour (reset moment) vs. candle at the end (exhaustion or terminal limit). Theme-adjacent temporal metaphors; distinct meanings. Related band."
+    },
+    {
+      "phrase_a_id": "blut-und-eisen",
+      "phrase_b_id": "das-feuer-der-ehre",
+      "relation": "related",
+      "attested_quote_a": "Blut und Eisen.",
+      "attested_source_a": "Goethe, Campagne in Frankreich (1792)",
+      "attested_quote_b": "Das Feuer der Ehre.",
+      "attested_source_b": "Schiller, Don Carlos, III, 5",
+      "rationale": "Both attest to martial or honor metaphors; blood and iron is brute force, fire of honor is principle-driven sacrifice. Related band."
+    }
+  ],
+  "schema_notes": [
+    "Each row carries phrase_a_id and phrase_b_id (slug FKs into phrases.id), the curated 4-way relation, and attested quote / source for both phrases (or a joint note).",
+    "Pairs with shared attested_quote_combined indicate same-scene attestations (used when the two phrases co-occur in the work).",
+    "The seed_phrase_pairs.py script (Phase 10.1, card t_18c90a68) reads this file and overwrites the auto-assigned relation and sets attested_pair=true for any matching (phrase_a_id, phrase_b_id) row.",
+    "Both phrase_a_id and phrase_b_id MUST exist in the planted phrases table at seed time. The Pydantic PhrasePairSeedRow validator catches missing slugs at parse time."
+  ]
+}
