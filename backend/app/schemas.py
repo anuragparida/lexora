@@ -1946,6 +1946,279 @@ class PhraseSeedRow(BaseModel):
             "(1168-1186)\"``). Always ``None`` in the 8.1 DWDS seed."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 10.1 (card t_18c90a68) — phrase_pair wire surface.
+#
+# ``phrase_pairs`` is the paired-row table that Phase 10.3's
+# ``/exercises/phrase_match`` endpoint reads from for nearest-
+# neighbor pulls (``enable_rag=True``). Phase 10.4 (Anurag) populates
+# ``backend/data/attested_pairs.json`` with Goethe/Schiller attested
+# pairs; Phase 10.1 just ships the wire shape, the seed script, and
+# the (empty) JSON scaffold so the script reads cleanly before 10.4.
+#
+# Hard rule (verbatim from the plan body): ``phrase_pairs`` is
+# read-only at runtime — no INSERT / UPDATE / ON CONFLICT DO UPDATE
+# from the FastAPI request path. The seed script is the single write
+# path (the same discipline as Phase 7.1 / 8.1 curated tables).
+#
+# Literal guardrails here mirror the Phase 7 / 8 dialect-agnostic
+# pattern: loose-String-on-the-DB, ``Literal`` at the wire layer.
+# ---------------------------------------------------------------------------
+
+
+# Phase 10.1 — 4-way relation literal (the same shape the plan body
+# ships verbatim). DB column stays loose String (the
+# ``phrase_pairs.relation`` column on ``app.models.PhrasePair``);
+# this Literal is the wire-level guardrail.
+PhrasePairRelation = Literal[
+    "equivalent", "paraphrase", "related", "unrelated"
+]
+
+
+def _is_phrase_pair_slug(value: str, *, field: str) -> str:
+    """Validate a phrase-pair slug FK (matches ``phrases.id``).
+
+    Mirrors the Phase 8.1 ``PhraseSeedRow.id`` discipline:
+    lowercase, hyphenated, 3-120 chars. The DB column is
+    ``phrases.id VARCHAR(120)`` so the upper bound is the same;
+    we tighten the slug-shape rules at the Pydantic layer so a
+    typo'd FK (e.g. a Capitalized slug) is caught at parse time
+    rather than at INSERT.
+
+    Raises ``ValueError`` with a parser-friendly message when the
+    value is not a valid slug.
+    """
+    import re
+
+    if not isinstance(value, str):
+        raise ValueError(
+            f"{field!r} must be a string slug, got {type(value).__name__}"
+        )
+    if len(value) < 3 or len(value) > 120:
+        raise ValueError(
+            f"{field!r} must be 3-120 chars (got len={len(value)})"
+        )
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value):
+        raise ValueError(
+            f"{field!r} must be lowercase-hyphenated ASCII slug "
+            f"(got {value!r})"
+        )
+    return value
+
+
+class PhrasePairSeedRow(BaseModel):
+    """Phase 10.1 — inbound shape for a single seed-script row.
+
+    Used by ``backend/scripts/seed_phrase_pairs.py`` to validate
+    the attested-pair override rows from
+    ``backend/data/attested_pairs.json`` before INSERT. Mirrors the
+    Phase 8.1 ``PhraseSeedRow`` discipline:
+
+    - ``phrase_a_id`` / ``phrase_b_id`` are slug FKs into
+      ``phrases.id`` — same slug shape (lowercase-hyphenated,
+      3-120 chars) the seed-script validator enforces. The plan
+      body explicitly requires this on the wire: any ``attested_pairs.json``
+      row whose slugs don't match an existing ``phrases.id`` value
+      fails with a ValueError here, *before* the row hits the DB.
+    - ``relation`` is the 4-way literal; the validator below
+      catches typos at parse time (same guardrail discipline as
+      ``frequency_band`` on ``PhraseSeedRow``).
+    - ``attested_pair`` defaults to ``False`` so the seed script's
+      ``ON CONFLICT (phrase_a_id, phrase_b_id) DO NOTHING`` path
+      can reuse this validator for the candidate-pool rows too.
+    - The hard rule ``phrase_a_id != phrase_b_id`` is enforced
+      here via the ``field_validator`` (the matching DB CHECK
+      constraint ships in the migration; the seed script also
+      pre-filters self-pairs before INSERT as belt-and-braces).
+
+    Wire contract (verbatim from the card body):
+
+    - ``phrase_a_id``: slug FK (lowercase-hyphenated, 3-120 chars).
+    - ``phrase_b_id``: slug FK, distinct from ``phrase_a_id``.
+    - ``relation``: one of
+      ``{"equivalent","paraphrase","related","unrelated"}``.
+    - ``attested_pair``: bool, default ``False``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    phrase_a_id: str = Field(
+        ...,
+        description=(
+            "Slug FK into ``phrases.id``. Lowercase-hyphenated "
+            "ASCII, 3-120 chars. Must match an existing ``phrases.id`` "
+            "value at INSERT time (the seed script enforces this)."
+        ),
+    )
+    phrase_b_id: str = Field(
+        ...,
+        description=(
+            "Slug FK into ``phrases.id``. Same shape as "
+            "``phrase_a_id``. Hard rule: must be distinct from "
+            "``phrase_a_id`` (the DB has a CHECK constraint; this "
+            "validator catches the violation at Pydantic parse time)."
+        ),
+    )
+    relation: PhrasePairRelation = Field(
+        ...,
+        description=(
+            "4-way relation literal. ``equivalent`` is the "
+            "near-synonymous band; ``paraphrase`` is same-meaning-"
+            "different-surface; ``related`` is theme- or register-"
+            "adjacent; ``unrelated`` anchors the negative-cohort "
+            "distractor surface."
+        ),
+    )
+    attested_pair: bool = Field(
+        default=False,
+        description=(
+            "``True`` for Goethe/Schiller attested-pair override "
+            "rows from ``attested_pairs.json`` (Phase 10.4); "
+            "``False`` for the seed-script's bge-m3-bucketed rows."
+        ),
+    )
+
+    @field_validator("phrase_a_id")
+    @classmethod
+    def _check_phrase_a_slug(cls, v: str) -> str:
+        return _is_phrase_pair_slug(v, field="phrase_a_id")
+
+    @field_validator("phrase_b_id")
+    @classmethod
+    def _check_phrase_b_slug(cls, v: str) -> str:
+        return _is_phrase_pair_slug(v, field="phrase_b_id")
+
+    @field_validator("relation", mode="before")
+    @classmethod
+    def _check_relation(cls, v):
+        if not isinstance(v, str):
+            raise ValueError(
+                f"relation must be a string (got {type(v).__name__})"
+            )
+        if v not in (
+            "equivalent", "paraphrase", "related", "unrelated"
+        ):
+            raise ValueError(
+                f"relation must be one of "
+                f"'equivalent'|'paraphrase'|'related'|'unrelated' "
+                f"(got {v!r})"
+            )
+        return v
+
+    @field_validator("phrase_b_id")
+    @classmethod
+    def _check_distinct_pair(cls, v: str, info):
+        # Cross-field check: ``phrase_a_id`` != ``phrase_b_id``.
+        # This mirrors the DB CHECK constraint at the Pydantic
+        # layer so the seed script catches self-pairs BEFORE
+        # building the INSERT statement. The validation uses
+        # ``info.data`` (Pydantic v2) so it's peer-of-the-other-
+        # field rather than order-dependent.
+        a = info.data.get("phrase_a_id") if info.data else None
+        if a is not None and v == a:
+            raise ValueError(
+                "phrase_a_id and phrase_b_id must be distinct "
+                f"(got both = {v!r})"
+            )
+        return v
+
+
+class PhrasePairOut(BaseModel):
+    """Phase 10.1 — outbound view of a single ``phrase_pairs`` row.
+
+    Wire-level fields mirror the SQLAlchemy model column-for-
+    column. The ``id`` field is the autoincrement integer PK; the
+    FKs are exposed as slug strings (same shape as
+    ``phrases.id``). ``relation`` is the validated 4-way literal
+    (this is the wire layer's contract — the DB stores a loose
+    String, so the validator below hardens it at parse time).
+
+    ``created_at`` is exposed because Phase 10.3's audit surface
+    (not in this card) may want to filter by insertion batch —
+    same shape as ``PhraseOut`` for consistency.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    phrase_a_id: str
+    phrase_b_id: str
+    relation: PhrasePairRelation
+    attested_pair: bool
+    created_at: datetime
+
+    @field_validator("relation", mode="before")
+    @classmethod
+    def _check_relation(cls, v):
+        if not isinstance(v, str):
+            raise ValueError(
+                f"relation must be a string (got {type(v).__name__})"
+            )
+        if v not in (
+            "equivalent", "paraphrase", "related", "unrelated"
+        ):
+            raise ValueError(
+                f"relation must be one of "
+                f"'equivalent'|'paraphrase'|'related'|'unrelated' "
+                f"(got {v!r})"
+            )
+        return v
+
+
+class PhrasePairSeedManifest(BaseModel):
+    """Phase 10.1 — wrapper for the seed-script CLI input.
+
+    The seed script reads ``backend/data/attested_pairs.json``
+    (the JSON object ``{"pairs": [...]}``) and validates every
+    entry against ``PhrasePairSeedRow``. The wrapper shape is
+    the JSON manifest's top-level ``{"pairs": [...]}`` form so
+    future fields (e.g. a global ``description``) don't have to
+    reshape the file.
+
+    - ``pairs``: list of seed rows. May be empty (Phase 10.4
+      hasn't shipped yet — the JSON ships with ``"pairs": []``
+      in 10.1 and grows as Anurag labels attested pairs).
+    - ``attested_pairs_filename``: the relative path the seed
+      script resolves against ``backend/data/``. Defaults to
+      ``"attested_pairs.json"`` so callers don't have to repeat
+      the filename.
+    """
+
+    pairs: list[PhrasePairSeedRow] = Field(
+        default_factory=list,
+        description=(
+            "Attested-pair rows (Phase 10.4 — Goethe/Schiller). "
+            "Each row is validated against ``PhrasePairSeedRow`` "
+            "at parse time. Empty list is the 10.1 starting state."
+        ),
+    )
+    attested_pairs_filename: str = Field(
+        default="attested_pairs.json",
+        description=(
+            "Filename resolved by the seed script relative to "
+            "``backend/data/``. Defaults to ``attested_pairs.json``."
+        ),
+    )
+
+    @field_validator("attested_pairs_filename")
+    @classmethod
+    def _check_filename(cls, v: str) -> str:
+        # Cheap guard: the filename shouldn't contain path
+        # separators (it's resolved relative to ``backend/data/``
+        # at the seed-script boundary, never absolute). The seed
+        # script enforces this too.
+        if "/" in v or "\\" in v:
+            raise ValueError(
+                f"attested_pairs_filename must be a bare filename "
+                f"(no path separators), got {v!r}"
+            )
+        if not v.strip():
+            raise ValueError("attested_pairs_filename must be non-empty")
+        return v
+
+
 # ---------------------------------------------------------------------------
 # Phase 8.3 (card t_fa86ac58) — Idiom exercise wire surface.
 #

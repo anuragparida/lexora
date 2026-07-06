@@ -1,0 +1,26 @@
+[
+  {
+    "phrase_a_id": "tomaten-auf-den-augen",
+    "phrase_b_id": "da-steppt-der-baer",
+    "relation": "unrelated",
+    "attested_pair": false
+  },
+  {
+    "phrase_a_id": "die-daumen-druecken",
+    "phrase_b_id": "da-steppt-der-baer",
+    "relation": "related",
+    "attested_pair": false
+  },
+  {
+    "phrase_a_id": "ins-blaue-hinein",
+    "phrase_b_id": "die-kirche-im-dorf-lassen",
+    "relation": "paraphrase",
+    "attested_pair": false
+  },
+  {
+    "phrase_a_id": "tomaten-auf-den-augen",
+    "phrase_b_id": "die-daumen-druecken",
+    "relation": "equivalent",
+    "attested_pair": true
+  }
+]
