@@ -12,6 +12,18 @@ import { GradeButtons } from '../components/GradeButtons'
 import { humanizeDelta } from '../components/delta'
 
 // Phase 10.5 (card t_ca1d2da8) — thin PhraseMatchPage.
+// Phase 10.6 (card t_da43cc23) widens the page to be mountable
+// inside the SessionPage mixer via three opt-in props:
+// ``word_id``, ``onGraded``, ``onGradeError``. When the mixer
+// mounts the page (all three props supplied), the page drops
+// its hardcoded ``word_id=1`` fallback for the queue-supplied
+// ``word_id``, suppresses the post-grade empty state, and
+// fires the callbacks so the mixer can advance. When any of
+// the three props is missing, the page falls back to its
+// Phase 10.5 standalone surface (hardcoded ``word_id=1`` for
+// self-contained testability + the "Generate another / Open
+// session mixer" empty-state CTAs). The existing Phase 10.5
+// tests exercise the standalone branch and stay unchanged.
 //
 // Mirrors IdiomPage's state machine (loading / ready / error /
 // empty / notFound) so the five per-type pages share the same
@@ -76,7 +88,66 @@ const RELATION_BUTTONS: ReadonlyArray<{
   { relation: 'unrelated', label: 'unrelated' },
 ]
 
-export function PhraseMatchPage() {
+// Phase 10.5 (card t_ca1d2da8): the closed 4-way relation
+// literal the learner picks from. Mirrors Phase 10.1's
+// ``phrase_pairs.relation`` column. The English literal is
+// also rendered on the wire (the data attribute) so Phase 10.4's
+// hand-labeled eval set can match the displayed-buttons to the
+// recorded relation without re-deriving it from the LTR text.
+//
+// Phase 10.6 (card t_da43cc23) — re-exported on the props
+// interface below so the SessionPage mixer can read the type
+// directly when checking which per-type page to mount. Stays
+// a closed literal; the mixer's switch on
+// ``exercise.exercise_type === 'phrase_match'`` is exhaustive.
+export type { PhrasePairRelation }
+
+// Phase 10.6 (card t_da43cc23) — the three opt-in props that
+// widen PhraseMatchPage from a standalone page into a
+// mixer-mountable component. All three are optional; when any
+// is missing the page falls back to its Phase 10.5 standalone
+// surface (hardcoded ``word_id=1`` for self-contained testing,
+// post-grade empty state with "Generate another / Open session
+// mixer" CTAs).
+//
+// The mixer always supplies all three: ``word_id`` from the
+// queue pick, ``onGraded`` for the mixer's ``setFetchAttempt``,
+// ``onGradeError`` for the mixer's toast / 401-bounce handler.
+// Standalone test users (the Phase 10.5 surface mounted at
+// ``/exercises/phrase_match``) supply none of them.
+export interface PhraseMatchPageProps {
+  /**
+   * Phase 10.6 — queue-supplied ``word_id`` from the mixer
+   * (replaces the hardcoded ``word_id=1`` fallback used in the
+   * Phase 10.5 standalone surface). When omitted, the page
+   * falls back to ``word_id=1`` (matches IdiomPage's
+   * self-contained testability pattern).
+   */
+  word_id?: number
+  /**
+   * Phase 10.6 — fired after the grade round-trip succeeds
+   * with the post-grade ``next_due_at``. The mixer uses this
+   * to bump ``fetchAttempt`` and fetch the next pick. When
+   * omitted, the page renders its standalone post-grade
+   * empty-state surface (the "Generate another / Open session
+   * mixer" CTA).
+   */
+  onGraded?: (next_due_at: string) => void
+  /**
+   * Phase 10.6 — fired when the grade round-trip throws. The
+   * mixer uses this to dispatch the 401-bounce / 422 toast
+   * (mirrors the SessionPage's own
+   * ``handleGradeError``). When omitted, the page renders
+   * its standalone error surface (the "Retry" CTA).
+   */
+  onGradeError?: (err: unknown) => void
+}
+
+export function PhraseMatchPage({
+  word_id: wordIdProp,
+  onGraded,
+  onGradeError,
+}: PhraseMatchPageProps = {}) {
   const navigate = useNavigate()
   const [status, setStatus] = useState<Status>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -105,12 +176,12 @@ export function PhraseMatchPage() {
     if (status !== 'loading') return
     const token = fetchAttempt
     let cancelled = false
-    // Phase 10.5 mirrors Phase 9.5's standalone-testable
-    // surface: a fixed-low ``word_id=1`` keeps the page
-    // self-contained against the seed corpus. Phase 9.6's
-    // session mixer (Phase 10.6) will widen this to a
-    // due-driven ``word_id`` — out of scope here.
-    const word_id = 1
+    // Phase 10.6 (card t_da43cc23) — the page picks the
+    // queue-supplied ``word_id`` from the mixer's prop when
+    // mounted inside the session mixer; otherwise it falls back
+    // to the Phase 10.5 self-contained ``word_id=1`` (matches
+    // IdiomPage's standalone surface for hermetic testing).
+    const word_id = wordIdProp ?? 1
     generatePhraseMatch({ word_id })
       .then((m) => {
         if (cancelled) return
@@ -134,20 +205,41 @@ export function PhraseMatchPage() {
     return () => {
       cancelled = true
     }
-  }, [fetchAttempt, status])
+  }, [fetchAttempt, status, wordIdProp])
 
-  const handleGraded = useCallback((next_due_at: string) => {
-    setExercise(null)
-    setPickedRelation(null)
-    setHasGraded(true)
-    setStatus('empty')
-    toast.success(
-      `Grade recorded. Next review ${humanizeDelta(next_due_at)}.`,
-    )
-  }, [])
+  const handleGraded = useCallback(
+    (next_due_at: string) => {
+      setExercise(null)
+      setPickedRelation(null)
+      setHasGraded(true)
+      // Phase 10.6 (card t_da43cc23) — when the mixer mounts
+      // the page (via ``onGraded`` callback), we signal the
+      // mixer and skip the post-grade empty state. The
+      // standalone branch keeps the existing empty-state
+      // surface ("Generate another / Open session mixer").
+      if (onGraded) {
+        onGraded(next_due_at)
+        return
+      }
+      setStatus('empty')
+      toast.success(
+        `Grade recorded. Next review ${humanizeDelta(next_due_at)}.`,
+      )
+    },
+    [onGraded],
+  )
 
   const handleGradeError = useCallback(
     (err: unknown) => {
+      // Phase 10.6 (card t_da43cc23) — when the mixer mounts
+      // the page (via ``onGradeError`` callback), we delegate
+      // to the mixer and skip the standalone error surface.
+      // The mixer's ``handleGradeError`` owns the 401-bounce
+      // + 422 toast discipline.
+      if (onGradeError) {
+        onGradeError(err)
+        return
+      }
       const errStatus =
         err instanceof ExerciseApiError ? err.status : undefined
       if (errStatus === 401) {
@@ -165,7 +257,7 @@ export function PhraseMatchPage() {
         toast.error('Grade failed — try again')
       }
     },
-    [navigate],
+    [navigate, onGradeError],
   )
 
   const handlePickRelation = useCallback((relation: PhrasePairRelation) => {
@@ -395,6 +487,18 @@ export function PhraseMatchPage() {
   }
 
   if (!exercise) {
+    // Phase 10.6 (card t_da43cc23) — when the mixer mounts the
+    // page, the post-grade path (``onGraded`` callback) nulls
+    // out ``exercise`` while ``status`` stays at ``'ready'``
+    // (the standalone ``setStatus('empty')`` branch is
+    // skipped). The mixer's ``fetchAttempt`` bump will mount a
+    // fresh PhraseMatchPage shortly, so we render an empty
+    // fragment here rather than the standalone "server
+    // returned an empty phrase pair" surface (which would
+    // confuse the user mid-session).
+    if (onGraded) {
+      return null
+    }
     return (
       <div className="max-w-2xl mx-auto px-6 py-12">
         <div className="rounded-lg border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">

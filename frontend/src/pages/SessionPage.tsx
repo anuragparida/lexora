@@ -6,35 +6,55 @@ import type {
   ComprehensionExercise,
   IdiomExercise,
   MatchingExercise,
+  PhraseMatchExercise,
 } from '../api/exercises'
 import {
   ExerciseApiError,
   generateComprehension,
   generateIdiom,
   generateMatch,
+  generatePhraseMatch,
 } from '../api/exercises'
 import { getNextDuePick } from '../api/session'
 import type { DuePick, DueQueueResult } from '../api/session'
 import { ExerciseCard } from '../components/ExerciseCard'
 import { humanizeDelta } from '../components/delta'
+import { PhraseMatchPage } from './PhraseMatchPage'
 
-// Phase 9.6 (card t_f1c63bfc) — the study-session mixer.
+// Phase 9.6 (card t_f1c63bfc) + Phase 10.6 (card t_da43cc23) —
+// the study-session mixer.
+//
+// Phase 10.6 widens the union surface to include
+// ``phrase_match`` (the 5th FSRS-graded exercise type). The
+// mixer's ``case "phrase_match"`` branch renders the bespoke
+// ``<PhraseMatchPage />`` (Phase 10.5) instead of the shared
+// ``<ExerciseCard />`` — the 4-button relation picker is the
+// page's job, not the card's. The 4 prior branches (cloze /
+// matching / comprehension / idiom) are unchanged.
 //
 // What this page does:
 //   1. On mount: fetch the next pick from ``GET /exercises/due``
-//      (the union surface widened by Phase 9.2). The pick is
-//      either a cloze body (200 + JSON) or a (type, card_id,
-//      word_id) header tuple (204 + X-Due-Exercise-Type/-Card-Id/-
-//      Word-Id) for matching / comprehension / idiom.
-//   2. Render ``<ExerciseCard exercise={...} />`` for the head
-//      pick. The card owns the body, the grade bar, and the
+//      (the union surface widened by Phase 9.2 / 10.6). The
+//      pick is either a cloze body (200 + JSON) or a (type,
+//      card_id, word_id) header tuple (204 + X-Due-Exercise-
+//      Type/-Card-Id/-Word-Id) for matching / comprehension /
+//      idiom / phrase_match.
+//   2. For cloze / matching / comprehension / idiom: render
+//      ``<ExerciseCard exercise={...} />`` for the head pick.
+//      The card owns the body, the grade bar, and the
 //      ``/exercises/grade`` round-trip — the page just provides
 //      the typed ``AnyExercise`` payload.
+//   2b. For phrase_match: render ``<PhraseMatchPage />`` with
+//      the queue-supplied ``word_id`` and the page's own
+//      grade + error callbacks. The bespoke relation picker +
+//      locked-until-picked grade bar lives on the page; the
+//      mixer only owns the queue lifecycle and the next-pick
+//      fetch.
 //   3. On grade success: fetch the next pick. The queue is
 //      re-fetched on every advance (Phase 9.2's union response
 //      carries exactly one pick, not a list) so the backend
 //      gets to re-rank the remaining due cards.
-//   4. On \"End session\" / queue-empty: navigate to home so the
+//   4. On "End session" / queue-empty: navigate to home so the
 //      user sees the master / library view.
 //
 // Why not hold a local queue of picks and ``.shift()`` on grade:
@@ -57,6 +77,17 @@ export function SessionPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [gradedCount, setGradedCount] = useState(0)
   const [fetchAttempt, setFetchAttempt] = useState(() => 1) // mount: trigger first fetch
+  // Phase 10.6 (card t_da43cc23) — when the picked exercise
+  // is a ``phrase_match`` (the bespoke 4-button relation
+  // picker), the mixer renders ``<PhraseMatchPage />`` instead
+  // of ``<ExerciseCard>``. We track the queue-supplied
+  // ``word_id`` so the page mounts with the right pair anchor;
+  // for cloze / matching / comprehension / idiom the body
+  // already carries its own ``target_word_id`` / ``word_id`` /
+  // ``pairs`` and the card renders directly.
+  const [phraseMatchWordId, setPhraseMatchWordId] = useState<
+    number | null
+  >(null)
 
   // ----- queue lifecycle -------------------------------------------------
 
@@ -111,6 +142,17 @@ export function SessionPage() {
       try {
         const body = await resolvePickBody(pick.pick)
         if (cancelled) return
+        // Phase 10.6 (card t_da43cc23) — track the queue-
+        // supplied ``word_id`` when the pick is a
+        // ``phrase_match``. The render branch reads this state
+        // to mount ``<PhraseMatchPage />`` with the right
+        // pair anchor. For the 4 prior types the body's own
+        // ``target_word_id`` / ``word_id`` / ``pairs`` field
+        // carries the wire shape and we set ``null`` to signal
+        // "render via ExerciseCard".
+        setPhraseMatchWordId(
+          pick.pick.kind === 'phrase_match' ? pick.pick.word_id : null,
+        )
         setExercise(body)
         setStatus('ready')
       } catch (err) {
@@ -132,7 +174,14 @@ export function SessionPage() {
       // The current pick is dropped from the local render so
       // the user sees the loading state until the next body
       // arrives.
+      //
+      // Phase 10.6 (card t_da43cc23) — also drop the
+      // queue-supplied ``word_id`` so the next render branch
+      // doesn't accidentally re-mount ``<PhraseMatchPage />``
+      // for a non-phrase_match pick. The fetch effect will
+      // re-set this on the next ``advanceToPick``.
       setExercise(null)
+      setPhraseMatchWordId(null)
       setErrorMessage(null)
       setGradedCount((n) => n + 1)
       setFetchAttempt((n) => n + 1)
@@ -346,18 +395,40 @@ export function SessionPage() {
           End session
         </button>
       </div>
-      <ExerciseCard
-        exercise={exercise}
-        onGraded={handleGraded}
-        onGradeError={handleGradeError}
-      />
+      {/*
+        Phase 10.6 (card t_da43cc23) — the ``phrase_match``
+        branch mounts ``<PhraseMatchPage />`` directly. The
+        bespoke 4-button relation picker + locked-until-picked
+        grade bar is the page's job; the shared
+        ``<ExerciseCard />`` only admits the phrase_match wire
+        for exhaustiveness without rendering it. The mixer's
+        own ``handleGraded`` / ``handleGradeError`` feed back
+        via the page's callback props so the queue advances
+        uniformly across all 5 exercise types.
+      */}
+      {exercise?.exercise_type === 'phrase_match' &&
+      phraseMatchWordId !== null ? (
+        <PhraseMatchPage
+          word_id={phraseMatchWordId}
+          onGraded={handleGraded}
+          onGradeError={handleGradeError}
+        />
+      ) : (
+        <ExerciseCard
+          exercise={exercise}
+          onGraded={handleGraded}
+          onGradeError={handleGradeError}
+        />
+      )}
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
 // resolvePickBody — turn a ``DuePick`` into the typed ``AnyExercise`` the
-// shared ``<ExerciseCard>`` renders.
+// shared ``<ExerciseCard>`` renders, OR — for the Phase 10.6
+// phrase_match branch — return the typed pick so the mixer can mount
+// ``<PhraseMatchPage />`` directly with the queue-supplied ``word_id``.
 //
 // Phase 9.2 widened ``/exercises/due`` to the union but only the cloze
 // branch returns the body inline (the cloze generator has a
@@ -375,6 +446,10 @@ export function SessionPage() {
 //   - ``idiom``: Phase 8.4 made ``word_id`` required; pass it through
 //     so the generator's ``phrases WHERE word_id == :word_id`` filter
 //     is anchored.
+//   - ``phrase_match`` (Phase 10.6): the per-type endpoint requires
+//     ``word_id`` (Phase 8.4 idiom discipline, mirrored by 10.3).
+//     The generated exercise targets the same word the queue picked,
+//     so the relation picker surfaces the right pair.
 // ---------------------------------------------------------------------------
 async function resolvePickBody(pick: DuePick): Promise<AnyExercise> {
   if (pick.kind === 'cloze') {
@@ -405,8 +480,19 @@ async function resolvePickBody(pick: DuePick): Promise<AnyExercise> {
     const body: ComprehensionExercise = await generateComprehension({})
     return body
   }
-  // pick.kind === 'idiom'
-  const body: IdiomExercise = await generateIdiom({
+  if (pick.kind === 'idiom') {
+    const body: IdiomExercise = await generateIdiom({
+      word_id: pick.word_id,
+    })
+    return body
+  }
+  // pick.kind === 'phrase_match' — Phase 10.6 (card t_da43cc23).
+  // Mirrors the idiom discipline: the per-type endpoint takes
+  // ``word_id`` as a required knob and resolves the curated
+  // phrase_pairs row for that seed. We pass the queue-supplied
+  // word_id through so the generator's ``select_phrase_pair``
+  // is anchored.
+  const body: PhraseMatchExercise = await generatePhraseMatch({
     word_id: pick.word_id,
   })
   return body

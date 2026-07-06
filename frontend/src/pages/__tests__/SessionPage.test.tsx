@@ -113,6 +113,7 @@ vi.mock('../../api/exercises', async () => {
     generateMatch: vi.fn(),
     generateComprehension: vi.fn(),
     generateIdiom: vi.fn(),
+    generatePhraseMatch: vi.fn(),
     gradeExercise: vi.fn(),
   }
 })
@@ -122,6 +123,7 @@ import {
   generateComprehension,
   generateIdiom,
   generateMatch,
+  generatePhraseMatch,
   gradeExercise,
 } from '../../api/exercises'
 
@@ -130,6 +132,7 @@ const mockedGradeSessionExercise = vi.mocked(gradeSessionExercise)
 const mockedGenerateMatch = vi.mocked(generateMatch)
 const mockedGenerateComprehension = vi.mocked(generateComprehension)
 const mockedGenerateIdiom = vi.mocked(generateIdiom)
+const mockedGeneratePhraseMatch = vi.mocked(generatePhraseMatch)
 const mockedGradeExercise = vi.mocked(gradeExercise)
 
 // ----- test scaffolding -------------------------------------------------
@@ -156,6 +159,7 @@ describe('SessionPage mixer (Phase 9.6)', () => {
     mockedGenerateMatch.mockReset()
     mockedGenerateComprehension.mockReset()
     mockedGenerateIdiom.mockReset()
+    mockedGeneratePhraseMatch.mockReset()
     mockedGradeExercise.mockReset()
   })
 
@@ -359,5 +363,109 @@ describe('SessionPage mixer (Phase 9.6)', () => {
     })
     // The error body carries the upstream message verbatim.
     expect(screen.getByText(/upstream LLM down/i)).toBeInTheDocument()
+  })
+})
+
+// ===========================================================================
+// Phase 10.6 (card t_da43cc23) — SessionPage mixer widens to
+// ``phrase_match`` (the 5th exercise type). The mixer mounts
+// ``<PhraseMatchPage />`` directly (instead of the shared
+// ``<ExerciseCard />``) because the bespoke 4-button relation
+// picker is the page's job; the page receives the queue-supplied
+// ``word_id`` and fires ``onGraded`` / ``onGradeError`` callbacks
+// back to the mixer so the queue advances uniformly across all
+// 5 types.
+// ===========================================================================
+
+const phraseMatchExercise = {
+  exercise_type: 'phrase_match' as const,
+  exercise_id: 700,
+  target_word_id: 12,
+  word_id: 12,
+  prompt_template_version: 'phrase_match-v1',
+  enable_rag: false,
+  trace_id: 'trace-pm-mixer-1',
+  latency_ms: 220,
+  phrase_a: 'ins Blaue hinein',
+  phrase_b: 'ohne klares Ziel',
+  relation: 'paraphrase' as const,
+  relation_rationale: 'Both describe acting without a clear plan.',
+  source_attribution: 'dwds',
+}
+
+describe('SessionPage mixer (Phase 10.6 phrase_match widening)', () => {
+  beforeEach(() => {
+    mockedGetNextDuePick.mockReset()
+    mockedGradeSessionExercise.mockReset()
+    mockedGenerateMatch.mockReset()
+    mockedGenerateComprehension.mockReset()
+    mockedGenerateIdiom.mockReset()
+    mockedGeneratePhraseMatch.mockReset()
+    mockedGradeExercise.mockReset()
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('resolves a phrase_match pick to the per-type generator (queue-supplied word_id)', async () => {
+    // Phase 10.6 (card t_da43cc23) — the mixer's
+    // ``resolvePickBody`` calls ``generatePhraseMatch({ word_id
+    // : pick.word_id })`` for phrase_match picks. The word_id
+    // flows from the queue's X-Due-Word-Id header into the
+    // generator's ``select_phrase_pair`` seed (Phase 10.3).
+    mockedGetNextDuePick.mockResolvedValueOnce({
+      kind: 'pick',
+      pick: { kind: 'phrase_match', card_id: 700, word_id: 12 },
+    })
+    mockedGeneratePhraseMatch.mockResolvedValue(phraseMatchExercise)
+
+    renderSession()
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('phrase-match-ready'),
+      ).toBeInTheDocument()
+    })
+    // The mixer passed the queue-supplied word_id through to
+    // the per-type endpoint (not the Phase 10.5 hardcoded
+    // ``word_id=1`` fallback).
+    expect(mockedGeneratePhraseMatch).toHaveBeenCalledWith({ word_id: 12 })
+  })
+
+  it('mounts <PhraseMatchPage /> for a phrase_match pick (not <ExerciseCard />)', async () => {
+    // Phase 10.6 (card t_da43cc23) — the mixer's render
+    // branch swaps to ``<PhraseMatchPage />`` for
+    // phrase_match picks. The bespoke relation picker is
+    // rendered; the shared ExerciseCard's wire-only
+    // phrase_match branch (which displays a "use the dedicated
+    // surface" hint) does NOT appear.
+    mockedGetNextDuePick.mockResolvedValueOnce({
+      kind: 'pick',
+      pick: { kind: 'phrase_match', card_id: 700, word_id: 12 },
+    })
+    mockedGeneratePhraseMatch.mockResolvedValue(phraseMatchExercise)
+
+    renderSession()
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('phrase-match-ready'),
+      ).toBeInTheDocument()
+    })
+    // The 4-button relation picker mounts — this is the
+    // PhraseMatchPage's render signature. ExerciseCard does
+    // NOT render this.
+    expect(
+      screen.getByTestId('phrase-match-relation-picker'),
+    ).toBeInTheDocument()
+    // The page's two-phrase cards mount with the per-type
+    // testids (phrase-a / phrase-b).
+    expect(screen.getByTestId('phrase-a-phrase')).toHaveTextContent(
+      'ins Blaue hinein',
+    )
+    expect(screen.getByTestId('phrase-b-phrase')).toHaveTextContent(
+      'ohne klares Ziel',
+    )
   })
 })

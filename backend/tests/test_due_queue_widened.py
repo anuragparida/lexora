@@ -429,19 +429,29 @@ def test_due_type_cloze_filter_explicit(
 
 
 # ===========================================================================
-# 3. /auth/me.due_by_type -- 4-key dict, all counts correct.
+# 3. /auth/me.due_by_type -- 5-key dict, all counts correct.
+#
+# Phase 10.6 (card t_da43cc23) widens the closure dict from 4 to
+# 5 keys additively. The Pydantic shape stays ``Dict[str, int]``
+# (not a closed Literal-tuple), so the wire contract is
+# non-breaking — only the implicit "always 4 keys" convention
+# shifts to "always 5 keys." phrase_match joins as the 5th
+# FSRS-graded exercise type (Phase 10.1 schema, 10.2 Literal
+# widening, 10.3 endpoint, 10.5 frontend page).
 # ===========================================================================
 
 
-def test_auth_me_due_by_type_4_keys_with_each_count(
+def test_auth_me_due_by_type_5_keys_with_each_count(
     client, db_session, fsrs_with_type_column
 ) -> None:
     """due_by_type reports correct counts per exercise type.
 
     Seeds 2 cloze, 1 matching, 0 comprehension (deliberately
-    absent), 1 idiom due. The 4-key dict reports each count
+    absent), 1 idiom due. The 5-key dict reports each count
     correctly; the comprehension branch verifies the zero-default
-    for missing types.
+    for missing types. The phrase_match branch verifies the
+    zero-default for the Phase-10.1 schema where no phrase_match
+    card has been seeded yet.
     """
     _signup(client)
 
@@ -474,12 +484,13 @@ def test_auth_me_due_by_type_4_keys_with_each_count(
     assert "due_by_type" in body, body
     counts = body["due_by_type"]
     assert set(counts.keys()) == {
-        "cloze", "matching", "comprehension", "idiom",
+        "cloze", "matching", "comprehension", "idiom", "phrase_match",
     }, counts
     assert counts["cloze"] == 2, counts
     assert counts["matching"] == 1, counts
     assert counts["comprehension"] == 0, counts
     assert counts["idiom"] == 1, counts
+    assert counts["phrase_match"] == 0, counts
 
 
 def test_auth_me_due_by_type_all_zero_when_no_due_cards(
@@ -490,7 +501,8 @@ def test_auth_me_due_by_type_all_zero_when_no_due_cards(
     Seeds a future-due card so the fsrs_cards table is not empty
     (the dict must reflect 'zero due', not 'no rows'). The SQL
     filter due_date <= now() excludes future cards; every key
-    resolves to 0.
+    (including the Phase-10.6 ``phrase_match`` bucket) resolves
+    to 0.
     """
     _signup(client)
     w = _seed_word(db_session, word="Hund", word_type="Noun")
@@ -511,6 +523,7 @@ def test_auth_me_due_by_type_all_zero_when_no_due_cards(
         "matching": 0,
         "comprehension": 0,
         "idiom": 0,
+        "phrase_match": 0,
     }, counts
 
 
@@ -524,7 +537,7 @@ def test_auth_me_due_by_type_legacy_schema_falls_back_to_cloze(
     implicitly cloze by Phase 5.6 contract. The route's inspect()
     probe returns False for the missing column; the fallback
     path buckets all due rows under cloze and leaves matching
-    / comprehension / idiom at zero.
+    / comprehension / idiom / phrase_match at zero.
     """
     _signup(client)
 
@@ -552,6 +565,7 @@ def test_auth_me_due_by_type_legacy_schema_falls_back_to_cloze(
         "matching": 0,
         "comprehension": 0,
         "idiom": 0,
+        "phrase_match": 0,
     }, counts
 
 
