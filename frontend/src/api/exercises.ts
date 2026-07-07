@@ -48,15 +48,61 @@ export type Grade = 1 | 2 | 3 | 4
 // ``backend/app/schemas.py::ExerciseType = Literal["cloze",
 // "matching", "comprehension", "idiom"]``. Phase 8.3 added
 // ``"idiom"``.
-export type ExerciseType = 'cloze' | 'matching' | 'comprehension' | 'idiom'
+//
+// Phase 10.5 (card t_ca1d2da8) — additive widening to 5. The
+// prior 4 stay narrow-compatible (no narrowing); ``"phrase_match"``
+// is the 5th wire literal for ``POST /exercises/phrase_match``
+// (Phase 10.3, ``t_13bb48d2``) and the 5th route through
+// ``_grade_one`` (``backend/app/main.py`` ``@app.post
+// "/exercises/grade"``).
+export type ExerciseType =
+  | 'cloze'
+  | 'matching'
+  | 'comprehension'
+  | 'idiom'
+  | 'phrase_match'
+
+// Phase 10.5 — the 4-way relation literal that Phase 10.1's
+// ``phrase_pairs.relation`` column encodes and Phase 10.3's
+// ``/exercises/phrase_match`` response echoes on the wire.
+// Mirrors ``backend/app/schemas.py::PhrasePairRelation``
+// (added by 10.1, ``t_18c90a68``). Closed-literal: any other
+// string is a wire validation error on both ends.
+export type PhrasePairRelation =
+  | 'equivalent'
+  | 'paraphrase'
+  | 'related'
+  | 'unrelated'
 
 // Phase 5.3 — request body for POST /exercises/grade, shared by
-// every per-type call (clo­ze / matching / comprehension / idiom).
-// Field names match the Pydantic ``GradeRequest`` model exactly.
+// every per-type call (clo­ze / matching / comprehension / idiom /
+// phrase_match). Field names match the Pydantic ``GradeRequest``
+// model exactly.
+//
+// Phase 10.5 — ``answer`` is an optional extension field used
+// by ``phrase_match`` to ship the learner's relation choice
+// alongside the FSRS grade in a single round trip (Phase 9.6's
+// "answer + grade in one request" discipline). Today's Pydantic
+// ``GradeRequest`` uses Pydantic v2's default
+// ``extra="ignore"`` so an unknown ``answer`` field is silently
+// dropped; when Phase 10.3 widens the backend Pydantic model
+// the frontend is already correctly shaped. The other 4 types
+// leave ``answer`` unset (Pydantic excludes ``undefined`` from
+// the JSON body).
 export interface GradeRequest {
   exercise_id: number
   exercise_type: ExerciseType
   grade: Grade
+  /**
+   * Optional per-type answer payload. Phase 10.5 sets this to
+   * the PhrasePairRelation literal for ``exercise_type ===
+   * "phrase_match"``; the other 4 exercise types leave it
+   * unset. The wire layer accepts any JSON-serialisable value
+   * here today (Pydantic's ``extra="ignore"`` drops it), and
+   * Phase 10.3's backend widening will tighten the type when
+   * it lands.
+   */
+  answer?: unknown
 }
 
 // Phase 5.3 — response body for POST /exercises/grade. Mirrors
@@ -211,6 +257,58 @@ export interface IdiomExercise extends BaseExerciseFields {
   cloze_target: string | null
 }
 
+// --- phrase_match (Phase 10.3 / 10.5) -------------------------------------
+
+// Phase 10.5 (card t_ca1d2da8) — outbound shape for
+// ``POST /exercises/phrase_match``. The two phrases are the
+// surfaced pair; ``relation_rationale`` is the single
+// learner-facing hint the page hover-reveals (Phase 8 idiom
+// pattern, applied per-pair). ``relation`` is the closed
+// 4-way literal the LLM picked (the "ground truth" relation
+// the learner is being asked to estimate); we surface it on
+// the wire but the page does NOT show it during the answer
+// step — only after the grade is recorded (Phase 9.6
+// discipline).
+//
+// Pydantic ``PhraseMatchExerciseOut`` is added in 10.3;
+// Phase 10.5 is the frontend's mirror, kept structurally
+// identical to the wire (snake_case). ``target_word_id`` is
+// the canonical Phase 6.1 cross-exercise-type name; the
+// request-side ``word_id`` echoes as ``word_id`` on the
+// response too (Phase 10.2 widens phrase-match to match the
+// cloze / matching / comprehension / idiom wire shapes, both
+// fields are kept for forward compatibility). ``source_attribution``
+// mirrors the 8.3 idiom field (closed comma-joined literal).
+export interface PhraseMatchExercise extends BaseExerciseFields {
+  exercise_type: 'phrase_match'
+  exercise_id: number
+  phrase_a: string
+  phrase_b: string
+  // Request-side pair-selector seed echoed from
+  // ``phrase_a_id``/``phrase_b_id`` resolution (NOT a
+  // ``words.id`` FK for phrase-match — see
+  // ``app.phrase_match.select_phrase_pair`` docstring).
+  word_id: number
+  // Closed 4-way relation literal the LLM picked — the
+  // "ground truth" relation. The page does NOT show this
+  // during the answer step; the relation the learner picks
+  // is what the grade call submits (the answer), and the
+  // server is the sole source of truth for the canonical
+  // relation.
+  relation: PhrasePairRelation
+  // 1..400 chars — learner-facing explanation of why the
+  // server picked ``relation``. The page uses this as the
+  // hover-revealed hint (mirrors the Phase 8 idiom
+  // ``definition`` pattern).
+  relation_rationale: string
+  // Comma-joined subset of
+  // ``Literal['dwds','goethe','schiller','bge-m3-cosine']``
+  // (same shape as 8.3 ``IdiomExerciseOut.source_attribution``).
+  // Surfaced only in the trace footer; not used in the answer
+  // step.
+  source_attribution: string
+}
+
 // --- cloze (re-exported for the shared ExerciseCard) -----------------------
 
 // Mirrors ``api/cloze.ts::ClozeExercise`` — re-declared here so the
@@ -237,11 +335,19 @@ export interface ClozeExerciseForCard extends BaseExerciseFields {
 
 // --- discriminated union used by ExerciseCard -----------------------------
 
+// Phase 10.5 (card t_ca1d2da8) — additive widening to 5 for
+// the discriminated union. Phase 9.5's switch in
+// ``ExerciseCard`` doesn't render ``phrase_match`` (the
+// bespoke 4-button relation picker is the page's job; the
+// shared card's render doesn't know about the relation
+// literal). The union widening here keeps the type system
+// honest for callers that DO want to consume phrase_match.
 export type AnyExercise =
   | ClozeExerciseForCard
   | MatchingExercise
   | ComprehensionExercise
   | IdiomExercise
+  | PhraseMatchExercise
 
 // --- per-type request shapes ---------------------------------------------
 
@@ -265,6 +371,22 @@ export interface ComprehensionGenerateRequest {
 // generator's ``phrases WHERE word_id == :word_id`` filter is
 // anchored). Empty body fails with HTTP 422.
 export interface IdiomGenerateRequest {
+  word_id: number
+  enable_rag?: boolean
+}
+
+// Phase 10.5 (card t_ca1d2da8) — ``PhraseMatchGenerateRequest``.
+// ``word_id`` mirrors the Phase 8.4 idiom discipline (required
+// — the curated ``phrase_pairs`` table is per-word: every pair
+// row carries a ``phrase_a_id`` / ``phrase_b_id`` whose phrases
+// anchor to a specific ``words.id`` via the
+// ``phrases.word_id`` FK from Phase 8.1). Empty body fails
+// with HTTP 422. ``enable_rag`` is the opt-in nearest-neighbor
+// flag for the bge-m3 retrieve step in the Phase 10.3
+// generator; defaults to ``false`` so the wire shape is
+// reproducible for the offline A/B eval (Phase 9.4 + 9.7
+// discipline).
+export interface PhraseMatchGenerateRequest {
   word_id: number
   enable_rag?: boolean
 }
@@ -375,4 +497,67 @@ export function gradeComprehension(exercise_id: number, grade: Grade) {
 }
 export function gradeIdiom(exercise_id: number, grade: Grade) {
   return gradeExercise('idiom', exercise_id, grade)
+}
+
+// --- phrase_match (Phase 10.3 / 10.5) -------------------------------------
+
+// POST /exercises/phrase_match — Phase 10.3 (``t_13bb48d2``).
+// ``word_id`` is required (mirrors Phase 8.4's idiom
+// discipline). The route mints a fresh ``exercise_id`` per
+// generation (same convention as the four prior per-type
+// routes — Phase 5.3 / 6.x / 8.3). When no pair row exists
+// for the supplied ``word_id`` the server returns 404 and the
+// page surfaces ``status === 'notFound'`` (same discipline as
+// ``IdiomNotFoundError`` handled in ``IdiomPage``).
+export async function generatePhraseMatch(
+  body: PhraseMatchGenerateRequest,
+): Promise<PhraseMatchExercise> {
+  const res = await fetch(`${API_URL}/exercises/phrase_match`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    throw await toApiError(res)
+  }
+  return (await res.json()) as PhraseMatchExercise
+}
+
+// POST /exercises/grade — Phase 10.5 reads it with the 5th
+// literal and the relation choice on the same call (Phase 9.6
+// discipline: the answer + grade are stored in distinct
+// fields on the grade call). Today's Pydantic ``GradeRequest``
+// has ``exercise_id`` + ``exercise_type`` + ``grade`` and
+// uses Pydantic v2's default ``extra="ignore"`` so the
+// additional ``answer`` field is silently dropped; the
+// backend's GradeRequest widening (10.3) will tighten the
+// type when it lands.
+//
+// We deliberately use a typed ``body`` here (``{ exercise_id,
+// exercise_type, grade, answer }``) instead of inlining a
+// generic ``gradeExercise('phrase_match', ...)`` call because
+// the relation literal is required and a typed call site
+// guards against accidentally sending a typo relation.
+export async function submitPhraseMatchGrade(
+  exercise_id: number,
+  relation: PhrasePairRelation,
+  grade: Grade,
+): Promise<GradeResponse> {
+  const body: GradeRequest = {
+    exercise_type: 'phrase_match',
+    exercise_id,
+    grade,
+    answer: relation,
+  }
+  const res = await fetch(`${API_URL}/exercises/grade`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    throw await toApiError(res)
+  }
+  return (await res.json()) as GradeResponse
 }

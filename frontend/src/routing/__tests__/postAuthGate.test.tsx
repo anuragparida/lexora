@@ -60,13 +60,24 @@ const userFixture: AuthUser = {
 
 // A signed-in fixture with an empty weakness profile and a fresh
 // diagnostic state — the classic "first login" profile.
+//
+// Phase 10.6 (card t_da43cc23) — the closure dict widens from 4
+// to 5 keys additively; ``phrase_match`` joins as the 5th
+// FSRS-graded exercise type with the same zero-default behavior
+// when no card is seeded for it.
 const meFreshUser: MePayload = {
   id: 1,
   email: 'test@example.com',
   created_at: '2026-07-03T00:00:00Z',
   weakness_profile: null,
   diagnostic_state: 'never',
-  due_by_type: { cloze: 0, matching: 0, comprehension: 0, idiom: 0 },
+  due_by_type: {
+    cloze: 0,
+    matching: 0,
+    comprehension: 0,
+    idiom: 0,
+    phrase_match: 0,
+  },
 }
 
 // A signed-in fixture with a non-empty weakness profile — the
@@ -82,7 +93,13 @@ const meProfileUser: MePayload = {
     updated_at: '2026-07-03T00:00:00Z',
   },
   diagnostic_state: 'applied',
-  due_by_type: { cloze: 0, matching: 0, comprehension: 0, idiom: 0 },
+  due_by_type: {
+    cloze: 0,
+    matching: 0,
+    comprehension: 0,
+    idiom: 0,
+    phrase_match: 0,
+  },
 }
 
 // AuthResponse shape — minimal, the form doesn't introspect it.
@@ -95,13 +112,23 @@ const authResponse = {
 // Note: ``matching > 0`` is the meaningful case here — a
 // matching-only due count would have been a cloze-only stranding
 // bug under Phase 5.6's gate.
+//
+// Phase 10.6 (card t_da43cc23) — the closure dict widens to 5
+// keys additively; ``phrase_match: 0`` joins the existing 4
+// buckets. The 5-type sum test exercises a 5-bucket gate read.
 const meSessionUser: MePayload = {
   id: 3,
   email: 'session@example.com',
   created_at: '2026-07-04T00:00:00Z',
   weakness_profile: null,
   diagnostic_state: 'never',
-  due_by_type: { cloze: 0, matching: 2, comprehension: 1, idiom: 0 },
+  due_by_type: {
+    cloze: 0,
+    matching: 2,
+    comprehension: 1,
+    idiom: 0,
+    phrase_match: 0,
+  },
 }
 
 // A pre-Phase-9.2 payload where ``due_by_type`` is absent.
@@ -179,7 +206,13 @@ describe('AuthForm gate (Phase 9.6 widening)', () => {
     // only checked cloze. Phase 9.6 widens this.
     const meMatchingOnly: MePayload = {
       ...meFreshUser,
-      due_by_type: { cloze: 0, matching: 3, comprehension: 0, idiom: 0 },
+      due_by_type: {
+        cloze: 0,
+        matching: 3,
+        comprehension: 0,
+        idiom: 0,
+        phrase_match: 0,
+      },
     }
     mockedGetMe.mockResolvedValue(meMatchingOnly)
     renderForm()
@@ -234,7 +267,13 @@ describe('AuthForm gate (Phase 9.6 widening)', () => {
     // study-session mixer first.
     const meReturningWithDue: MePayload = {
       ...meProfileUser,
-      due_by_type: { cloze: 1, matching: 0, comprehension: 0, idiom: 0 },
+      due_by_type: {
+        cloze: 1,
+        matching: 0,
+        comprehension: 0,
+        idiom: 0,
+        phrase_match: 0,
+      },
     }
     mockedGetMe.mockResolvedValue(meReturningWithDue)
     renderForm()
@@ -261,5 +300,76 @@ describe('AuthForm gate (Phase 9.6 widening)', () => {
       expect(screen.getByText('DIAGNOSTIC_PAGE')).toBeInTheDocument()
     })
     expect(screen.queryByText('EXERCISES_SESSION_PAGE')).not.toBeInTheDocument()
+  })
+})
+
+// Phase 10.6 (card t_da43cc23) — gate-widening hard rule: a
+// user with only a phrase_match card due must land on
+// /exercises/session. Without the 5-key ``due_by_type`` widening
+// the gate's ``totalDue`` would sum to zero and route the user to
+// /weakness-profile, which would strand them on the wrong landing
+// page (the prior Phase 5.6 cloze-only stranding bug, generalised
+// to phrase_match).
+describe('AuthForm gate (Phase 10.6 phrase_match widening)', () => {
+  beforeEach(() => {
+    mockedLogin.mockReset()
+    mockedSignup.mockReset()
+    mockedGetMe.mockReset()
+    mockedLogin.mockResolvedValue(authResponse)
+    mockedSignup.mockResolvedValue(authResponse)
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('routes to /exercises/session when only the phrase_match bucket is nonzero', async () => {
+    // The gate-widening hard rule: phrase_match-only due counts
+    // route to /exercises/session. The 4 prior types all sit at
+    // zero; the 5-key dict sums to 1 via the phrase_match
+    // bucket. Without the 10.6 widening the sum would be 0 and
+    // the gate would fall through to /weakness-profile.
+    const mePhraseMatchOnly: MePayload = {
+      ...meFreshUser,
+      due_by_type: {
+        cloze: 0,
+        matching: 0,
+        comprehension: 0,
+        idiom: 0,
+        phrase_match: 1,
+      },
+    }
+    mockedGetMe.mockResolvedValue(mePhraseMatchOnly)
+    renderForm()
+    await submitLoginForm()
+    await waitFor(() => {
+      expect(screen.getByText('EXERCISES_SESSION_PAGE')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('WEAKNESS_PROFILE_PAGE')).not.toBeInTheDocument()
+    expect(screen.queryByText('DIAGNOSTIC_PAGE')).not.toBeInTheDocument()
+  })
+
+  it('treats phrase_match as part of the nonzero-sum branch alongside the 4 prior types', async () => {
+    // Mixed: cloze=2, phrase_match=1 (others=0). Sum = 3.
+    // Verifies the gate's reducer reads the phrase_match
+    // bucket additively with the 4 prior types — a learner
+    // with mixed due cards across the union lands on the
+    // mixer.
+    const meMixed: MePayload = {
+      ...meFreshUser,
+      due_by_type: {
+        cloze: 2,
+        matching: 0,
+        comprehension: 0,
+        idiom: 0,
+        phrase_match: 1,
+      },
+    }
+    mockedGetMe.mockResolvedValue(meMixed)
+    renderForm()
+    await submitLoginForm()
+    await waitFor(() => {
+      expect(screen.getByText('EXERCISES_SESSION_PAGE')).toBeInTheDocument()
+    })
   })
 })

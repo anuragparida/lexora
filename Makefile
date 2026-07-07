@@ -12,7 +12,8 @@
 #     make eval-optimize-cloze         # Phase 4.4 MIPROv2 optimizer (offline)
 #     make eval-optimize-match         # Phase 9.3 MIPROv2 optimizer (offline)
 #     make eval-optimize-comprehension # Phase 9.4 MIPROv2 optimizer (offline)
-#     make eval-optimize-all           # chain cloze + match + comprehension
+#     make eval-optimize-phrase-match  # Phase 10.7 optimizer (offline)
+#     make eval-optimize-all           # chain cloze + match + comprehension + phrase_match
 #
 # Or pass --live for the live path (requires OPENROUTER_API_KEY
 # + a warm bge-m3 cache for the retrieval compare). Live-LLM runs
@@ -21,6 +22,7 @@
 
 .PHONY: eval-ragas eval-retrieval-compare \
         eval-optimize-cloze eval-optimize-match eval-optimize-comprehension \
+        eval-optimize-phrase-match \
         eval-optimize-all
 
 # Phase 6.7 Ragas regression detector.
@@ -55,10 +57,21 @@ eval-optimize-match:
 eval-optimize-comprehension:
 	cd backend && uv run python -m scripts.optimize_comprehension
 
-# Chain cloze + match + comprehension. ``make -k`` keeps going on a
-# per-target failure so one broken script doesn't block the others
-# (the operator inspects each artifact individually anyway).
+# Phase 10.7 — DSPy phrase_match optimizer.
+# Default mode (no --live) is the DummyLM offline path so the CLI
+# plumbing runs end-to-end without network. Pass --live only after
+# the Phase 6.7 Ragas floor is green. Mirrors the eval-optimize-match
+# shape: same DummyLM discipline, same --live gate, same artifact
+# path (``backend/app/phrase_match_optimized.json``).
+eval-optimize-phrase-match:
+	cd backend && uv run python -m scripts.optimize_phrase_match
+
+# Chain cloze + match + comprehension + phrase_match. ``make -k``
+# keeps going on a per-target failure so one broken script doesn't
+# block the others (the operator inspects each artifact
+# individually anyway).
 eval-optimize-all:
 	$(MAKE) -k eval-optimize-cloze
 	$(MAKE) -k eval-optimize-match
 	$(MAKE) -k eval-optimize-comprehension
+	$(MAKE) -k eval-optimize-phrase-match

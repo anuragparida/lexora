@@ -48,11 +48,11 @@ export interface WeaknessProfileSummary {
 // are unchanged from Phase 2.3.
 //
 // Phase 9.6 (card t_f1c63bfc) widens the payload with
-// `due_by_type` — a 4-key dict counting due `fsrs_cards` rows
+// `due_by_type` — a 5-key dict counting due `fsrs_cards` rows
 // of each exercise type (`cloze`, `matching`, `comprehension`,
-// `idiom`). The first-login gate (Phase 9.6, widening Phase 5.6's
-// cloze-only branch) reads the dict total to decide between
-// `/exercises/session` (any nonzero sum) and the legacy
+// `idiom`, `phrase_match`). The first-login gate (Phase 9.6,
+// widened by 10.6 to 5 keys) reads the dict total to decide
+// between `/exercises/session` (any nonzero sum) and the legacy
 // profile-state branches. The field is always-present on the
 // wire (the backend defaults to all-zero on a pre-Phase-9.1
 // legacy schema where the `exercise_type` column doesn't
@@ -67,17 +67,22 @@ export interface MePayload {
   // the same as `{axes: {}}`.
   weakness_profile: WeaknessProfileSummary | null
   diagnostic_state: DiagnosticState
-  // Phase 9.6 — per-exercise-type due-card counts. Mirrors
+  // Phase 9.6 / 10.6 — per-exercise-type due-card counts. Mirrors
   // ``backend/app/schemas.py::MeOut.due_by_type``. The closed
-  // 4-key shape lets the gate ``Object.values(due_by_type)
+  // 5-key shape lets the gate ``Object.values(due_by_type)
   //   .reduce((a, b) => a + b, 0)`` without a fallback path.
   // Optional for backward compatibility with a pre-9.2 cached
-  // payload; the gate treats a missing field as zero sum.
+  // payload; the gate treats a missing field as zero sum. Phase
+  // 10.6 widens the closure dict from 4 to 5 keys additively;
+  // ``phrase_match`` joins as the 5th FSRS-graded exercise type
+  // (Phase 10.1 schema, 10.2 Literal widening, 10.3 endpoint,
+  // 10.5 frontend page).
   due_by_type?: {
     cloze: number
     matching: number
     comprehension: number
     idiom: number
+    phrase_match: number
   }
 }
 
@@ -86,11 +91,16 @@ export interface MePayload {
 // backend always returns it, but a stale / pre-9.2 payload
 // from a cached login might not). The runtime fetch reads the
 // field defensively and falls back to all-zero on absence.
+//
+// Phase 10.6 widens this mirror to the same 5-key shape as
+// ``MePayload.due_by_type`` so the gate's reducer reads every
+// bucket without an undefined-key path.
 export interface DueByTypePayload {
   cloze: number
   matching: number
   comprehension: number
   idiom: number
+  phrase_match: number
 }
 
 // Phase 2.3's `AuthUser` shape — what `signup` / `login` return under

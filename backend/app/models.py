@@ -616,3 +616,112 @@ class Phrase(Base):
         default=datetime.utcnow,
         server_default=sa.func.now(),
     )
+
+
+class PhrasePair(Base):
+    """Phase 10.1 (card t_18c90a68) — curated phrase-pair relationships.
+
+    A *phrase pair* is a relation between two ``phrases`` rows (the
+    Phase 8.1 / 8.2 ``phrases`` table — multi-word fixed
+    expressions like ``ins Blaue hinein``). The four-way relation
+    literal encodes the closeness of the pair::
+
+        - "equivalent": near-synonymous in form AND meaning
+          (``Tomaten auf den Augen`` ≈ ``Scheuklappen auf`` is too
+          lossy to qualify; this band is reserved for the very
+          closest paraphrase-pairs).
+        - "paraphrase": same meaning, different surface form
+          (``das geht mir auf den Keks`` ≈ ``das nervt mich``).
+        - "related": theme- or register-adjacent, not interchangeable
+          (``Tomaten auf den Augen`` ~ ``den inneren Schweinehund
+          überwinden`` — both are figurative body-part idioms but
+          the topic is unrelated).
+        - "unrelated": included for the exercise generator's
+          distractor surface; ``unrelated`` rows anchor the
+          negative-cohort retrieval pull at request time.
+
+    Like ``phrases``, this table is **read-only at runtime**
+    (Hard rule #2 of PHASE-8.md, restated verbatim by the
+    plan body for Phase 10). The Phase 10.3 ``/exercises/phrase_match``
+    endpoint *reads* from it (e.g. for the ``enable_rag=True``
+    nearest-neighbor pull); nothing writes to it at request time.
+
+    Columns mirror the card body exactly:
+
+    - ``id`` — autoincrement integer PK (NOT slug). ``phrase_pairs``
+      rows are paired-pair identities, not human-readable
+      handles — the FKs (``phrase_a_id`` / ``phrase_b_id``) carry
+      the meaning. Index is implicit on the PK.
+    - ``phrase_a_id`` — FK to ``phrases.id``
+      (``ondelete="RESTRICT"`` — never cascade-delete a phrase just
+      because its pair row goes away). Indexed
+      (``ix_phrase_pairs_phrase_a_id``).
+    - ``phrase_b_id`` — FK to ``phrases.id``, same
+      ``ondelete="RESTRICT"``. Indexed
+      (``ix_phrase_pairs_phrase_b_id``).
+    - ``relation`` — VARCHAR, NOT NULL. Loose-String-on-the-DB /
+      Literal-at-the-wire-layer (matches ``register`` /
+      ``source_corpus`` on Phase 7.1, ``frequency_band`` on 8.1).
+      Indexed (``ix_phrase_pairs_relation``) for the
+      Phase 10.3 nearest-neighbor pull when the request
+      pins a relation.
+    - ``attested_pair`` — BOOLEAN, NOT NULL. ``True`` for the
+      Goethe / Schiller attested-pair override rows that
+      ``backend/data/attested_pairs.json`` declares; ``False``
+      for the seed-script's bge-m3-bucketed rows. Indexed
+      (``ix_phrase_pairs_attested_pair``) so the planner can
+      quickly fetch the attested subset.
+    - ``created_at`` — DB-side default ``sa.func.now()`` (mirrors
+      Phase 8.1's idiom).
+
+    Hard rules at the DB level:
+
+    - ``phrase_a_id != phrase_b_id`` (CHECK constraint; the card
+      body says "422 on a row whose ``phrase_a_id`` and
+      ``phrase_b_id`` are the same"). The seed script enforces
+      this at insert time; the Phase 10.3 wire endpoint enforces
+      it at request time via the matching Pydantic validator
+      on ``PhrasePairSeedRow``.
+    - ``UNIQUE(phrase_a_id, phrase_b_id)`` — same pair can't
+      appear twice with swapped order. The seed script sorts
+      ``(a, b)`` lexicographically before insert so the (a, b)
+      pair never collides with its (b, a) mirror.
+
+    The migration in ``10a1_phrase_pairs_table`` ships the table
+    itself plus all four indexes and the two constraints (UNIQUE
+    + CHECK). The migration is ``inspect()``-guarded so re-running
+    ``alembic upgrade head`` is a clean no-op.
+    """
+
+    __tablename__ = "phrase_pairs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # ``ondelete="RESTRICT"`` — same discipline as Phase 7.1
+    # ``collocations.verb_lemma`` FK: a paired-pair row outlives
+    # even the removal of its parent phrase (an audit trail is
+    # more useful than a silent cascade).
+    phrase_a_id = Column(
+        String(120),
+        ForeignKey("phrases.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    phrase_b_id = Column(
+        String(120),
+        ForeignKey("phrases.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    # Loose String on the DB; the Pydantic
+    # ``PhrasePairRelation`` literal at the wire layer
+    # (``app.schemas``) is the wire-level guardrail.
+    relation = Column(String, nullable=False, index=True)
+    attested_pair = Column(
+        Boolean, nullable=False, default=False, index=True
+    )
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=sa.func.now(),
+    )

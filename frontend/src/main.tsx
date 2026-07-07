@@ -12,6 +12,7 @@ import { ClozePage } from './pages/ClozePage'
 import { MatchingPage } from './pages/MatchingPage'
 import { ComprehensionPage } from './pages/ComprehensionPage'
 import { IdiomPage } from './pages/IdiomPage'
+import { PhraseMatchPage } from './pages/PhraseMatchPage'
 import { SessionPage } from './pages/SessionPage'
 import { AuthForm } from './components/AuthForm'
 import { ProtectedRoute } from './components/ProtectedRoute'
@@ -117,6 +118,14 @@ createRoot(document.getElementById('root')!).render(
             element={
               <ProtectedRoute>
                 {() => <IdiomPage />}
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/exercises/phrase_match"
+            element={
+              <ProtectedRoute>
+                {() => <PhraseMatchPage />}
               </ProtectedRoute>
             }
           />

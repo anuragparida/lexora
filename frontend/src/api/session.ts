@@ -1,11 +1,10 @@
-// Phase 9.6 (card t_f1c63bfc) — the session-mixer API client.
-//
-// The Phase 9.6 ``SessionPage`` mixer is the union consumer: it
-// hits ``GET /exercises/due`` with no type filter (which now
-// returns the union across cloze / matching / comprehension /
-// idiom per Phase 9.2), advances the local queue on each grade,
-// and uses ``/auth/me.due_by_type`` for the first-login gate's
-// "is there anything to study?" branch.
+// Phase 10.6 (card t_da43cc23) widens the union surface to the
+// 5th exercise type, ``phrase_match``. Phase 9.2 widened
+// ``/exercises/due`` to the union of due ``fsrs_cards`` rows
+// across cloze / matching / comprehension / idiom; Phase 10.6
+// adds ``phrase_match`` additively (no narrowing of the 4 prior
+// types). Phase 9.2's ``/auth/me.due_by_type`` payload was
+// widened to a 5-key dict in lockstep.
 //
 // Why this lives in its own module rather than alongside
 // ``api/due.ts`` (Phase 5.6) or ``api/cloze.ts`` (Phase 4.5):
@@ -93,14 +92,19 @@ async function toApiError(res: Response): Promise<SessionApiError> {
 // --- /auth/me.due_by_type shape -----------------------------------------
 
 // Phase 9.2 (``backend/app/schemas.py::MeOut.due_by_type``) —
-// always-present 4-key dict. The shape is closed at the wire so
-// the gate / mixer can ``Object.values(due_by_type).reduce``
-// without null-checking the dict.
+// 5-key dict (cloze / matching / comprehension / idiom /
+// phrase_match). Phase 10.6 widened the closure dict additively;
+// the 4 prior buckets keep their semantics and ``phrase_match``
+// joins as the 5th FSRS-graded exercise type. The shape is
+// closed at the wire so the gate / mixer can
+// ``Object.values(due_by_type).reduce`` without null-checking
+// the dict.
 export type DueByType = {
   cloze: number
   matching: number
   comprehension: number
   idiom: number
+  phrase_match: number
 }
 
 // Phase 9.2 — extended ``MePayload`` shape. Kept here (rather
@@ -113,24 +117,42 @@ export interface MePayloadWithDue {
 
 // --- /exercises/due union shape -----------------------------------------
 
-// The 4 exercise types the union can pick from. Mirrors the
+// The 5 exercise types the union can pick from. Mirrors the
 // ``ExerciseType`` literal in ``api/exercises.ts``; we re-declare
 // it as a tighter subset because the mixer's grade-and-advance
-// path only ever handles these 4.
-export type SessionExerciseType = 'cloze' | 'matching' | 'comprehension' | 'idiom'
+// path only ever handles these 5.
+//
+// Phase 10.6 (card t_da43cc23) widens from 4 to 5 additively —
+// ``phrase_match`` joins the union as the 5th literal. The 4
+// prior members stay narrow-compatible; ``phrase_match`` is the
+// per-type page (10.5) plus the queue-driven ``word_id``
+// resolution in the mixer's ``resolvePickBody``.
+export type SessionExerciseType =
+  | 'cloze'
+  | 'matching'
+  | 'comprehension'
+  | 'idiom'
+  | 'phrase_match'
 
 // The mixed pick the session mixer dequeues. Cloze picks carry
 // the body inline; non-cloze picks carry the (type, card_id,
 // word_id) tuple the mixer uses to call the per-type generator
 // endpoint. The discriminator is `kind` so the mixer can switch
 // exhaustively without TypeScript falling back to `any`.
+//
+// Phase 10.6 widens the union arm list from 4 to 5: the
+// ``phrase_match`` pick carries the same (card_id, word_id)
+// shape as matching / comprehension / idiom — the per-type
+// generator endpoint resolves the pair via
+// ``generatePhraseMatch({ word_id })`` which mirrors the
+// idiom / matching discipline.
 export type DuePick =
   | {
       kind: 'cloze'
       exercise: ClozeExerciseOut
     }
   | {
-      kind: 'matching' | 'comprehension' | 'idiom'
+      kind: 'matching' | 'comprehension' | 'idiom' | 'phrase_match'
       card_id: number
       word_id: number
     }
@@ -184,13 +206,23 @@ export async function getNextDuePick(): Promise<DueQueueResult> {
       headerCardId !== null &&
       headerWordId !== null
     ) {
-      // The Phase 9.2 route only emits these headers for the
-      // union branch where ``type=any`` (the default). Validate
-      // the type is in the closed union before trusting it.
+      // The Phase 9.2 / 10.6 route only emits these headers
+      // for the union branch where ``type=any`` (the default).
+      // Validate the type is in the closed union before
+      // trusting it.
       if (
         headerType === 'matching' ||
         headerType === 'comprehension' ||
-        headerType === 'idiom'
+        headerType === 'idiom' ||
+        // Phase 10.6 (card t_da43cc23) — the 5th union member
+        // rides the same read-side widening as the 4 prior
+        // non-cloze types. The backend's ``picked_card_type
+        // != 'cloze'`` branch emits ``X-Due-Exercise-Type:
+        // phrase_match`` for phrase_match cards; the frontend
+        // resolves the body via
+        // ``generatePhraseMatch({ word_id })`` in the mixer's
+        // ``resolvePickBody``.
+        headerType === 'phrase_match'
       ) {
         const card_id = Number(headerCardId)
         const word_id = Number(headerWordId)

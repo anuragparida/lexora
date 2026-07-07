@@ -30,21 +30,28 @@
 // Phase 3.3.
 //
 // ------------------------------------------------------------------------
-// PHASE 6 HARD RULE #11 — DELIBERATE OFFENSE (Phase 9.6)
+// PHASE 6 HARD RULE #11 — DELIBERATE OFFENSE (Phase 9.6 + Phase 10.6)
 // ------------------------------------------------------------------------
 // Phase 6 hard rule #11 said: "the first-login gate stays
 // cloze-only." Phase 9.6 widens this — the gate now reads the
 // full ``due_by_type`` union (cloze + matching + comprehension
 // + idiom) and routes to ``/exercises/session`` whenever ANY
 // type has outstanding cards. This is intentional: the Phase
-// 9 plan delivers a study-session mixer that fuses all four
+// 9 plan delivers a study-session mixer that fuses the 4
 // types, and a cloze-only gate would strand users with
 // matching-only due cards on the wrong landing page.
+//
+// Phase 10.6 (card t_da43cc23) widens the union additively to
+// include ``phrase_match`` (the 5th FSRS-graded exercise type
+// per Phase 10.1 schema + 10.2 Literal widening + 10.3 endpoint
+// + 10.5 frontend page). The gate now sums the 5-key
+// ``due_by_type`` dict; a learner with only a ``phrase_match``
+// card due lands on the study-session mixer.
 //
 // The offense is called out here so a future maintainer who
 // re-asserts the Phase 6 hard rule #11 (or a project-policy
 // sweep that assumes gates stay cloze-only) knows it's a
-// deliberate Phase 9 widening, not a regression. See the
+// deliberate Phase 9 / 10 widening, not a regression. See the
 // ``PHASE-9.md`` spec for the plan-level rationale.
 // ------------------------------------------------------------------------
 //
@@ -93,13 +100,22 @@ function isEmptyProfile(
   return Object.keys(profile.axes).length === 0
 }
 
-// Phase 9.6 (card t_f1c63bfc): sum the ``due_by_type`` counts.
+// Phase 9.6 (card t_f1c63bfc) + Phase 10.6 (card t_da43cc23):
+// sum the ``due_by_type`` counts.
+//
+// Phase 9.6 widened the gate from cloze-only (Phase 5.6) to the
+// union of cloze / matching / comprehension / idiom. Phase 10.6
+// widens the union additively to include ``phrase_match`` (the
+// 5th FSRS-graded exercise type) so a learner with only a
+// phrase_match card due lands on ``/exercises/session`` instead
+// of falling through to ``/weakness-profile``.
+//
 // Defensive against a missing / undefined ``due_by_type`` field
 // (a pre-Phase-9.2 backend that predates the union widening, or
 // a stale cached login payload) — both produce a zero sum and
 // fall through to the legacy pure gate.
 //
-// Note: the backend always emits the dict with all 4 keys at
+// Note: the backend always emits the dict with all 5 keys at
 // zero on a pre-9.1 legacy schema; the optional ``?`` on the
 // TypeScript type only exists to keep the gate robust against
 // an extremely old cached payload. The runtime path doesn't
@@ -107,7 +123,7 @@ function isEmptyProfile(
 function totalDue(me: MePayload): number {
   const d = me.due_by_type
   if (d === undefined || d === null) return 0
-  return d.cloze + d.matching + d.comprehension + d.idiom
+  return d.cloze + d.matching + d.comprehension + d.idiom + d.phrase_match
 }
 
 // Phase 3.3 (card t_ff6fa637): pure-function gate. Decides between

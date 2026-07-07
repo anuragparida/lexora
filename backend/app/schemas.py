@@ -360,13 +360,13 @@ class MeOut(BaseModel):
     client that only reads ``id``/``email`` keeps working.
 
     Phase 9.2 (card t_e4988202) widens the payload with
-    ``due_by_type`` — a 4-key dict counting due ``fsrs_cards`` rows
+    ``due_by_type`` — a 5-key dict counting due ``fsrs_cards`` rows
     of each exercise type (``cloze``, ``matching``,
-    ``comprehension``, ``idiom``). The frontend's first-login gate
-    (Phase 9.6) reads the dict total to decide between cloze-only
-    routing and the new union study-session mixer; cloze-only
-    callers that only read ``id``/``email`` keep working because
-    the field is additive.
+    ``comprehension``, ``idiom``, ``phrase_match``). The frontend's
+    first-login gate (Phase 9.6, widened by 10.6 to 5 keys) reads
+    the dict total to decide between cloze-only routing and the
+    union study-session mixer; cloze-only callers that only read
+    ``id``/``email`` keep working because the field is additive.
 
     On the legacy fsrs_cards schema (pre-Phase 9.1 — no
     ``exercise_type`` column), the dict defaults to all-zeros
@@ -374,7 +374,7 @@ class MeOut(BaseModel):
     table (Phase 5's single-user dev assumption). The Pydantic
     Literal-typed wrapper keeps the wire shape stable across the
     schema transition; the route-layer is responsible for
-    splitting the count across the 4 keys.
+    splitting the count across the 5 keys.
     """
 
     id: int
@@ -386,25 +386,36 @@ class MeOut(BaseModel):
     weakness_profile: Optional[WeaknessProfileOut] = None
     diagnostic_state: DiagnosticState = "never"
     # Phase 9.2 — counts of due ``fsrs_cards`` rows per exercise
-    # type. Always-present 4-key dict so the frontend can branch on
+    # type. Always-present 5-key dict so the frontend can branch on
     # ``sum(due_by_type.values())`` without null-checking the dict.
     # Missing keys (i.e. a pre-Phase-9.1 legacy schema where the
     # ``exercise_type`` column doesn't exist) get folded into the
     # ``cloze`` key per the single-user dev assumption documented
     # in Phase 5.6's ``/exercises/due`` route header.
+    #
+    # Phase 10.6 (card t_da43cc23) widens the closure dict from
+    # 4 to 5 keys additively; ``phrase_match`` joins as the 5th
+    # FSRS-graded exercise type. The Pydantic shape stays
+    # ``Dict[str, int]`` (not a closed Literal-tuple), so the wire
+    # contract is non-breaking — only the implicit "always 4 keys"
+    # convention shifts to "always 5 keys." A pre-Phase-10.1 schema
+    # where no ``phrase_match`` row exists reports
+    # ``phrase_match: 0`` by the same missing-key default rule.
     due_by_type: Dict[str, int] = Field(
         default_factory=lambda: {
             "cloze": 0,
             "matching": 0,
             "comprehension": 0,
             "idiom": 0,
+            "phrase_match": 0,
         },
         description=(
             "Phase 9.2 (card t_e4988202) — count of fsrs_cards rows "
             "with due_date <= now() for each exercise type. Always "
-            "4 keys (``cloze``, ``matching``, ``comprehension``, "
-            "``idiom``); zero for absent types. Used by the Phase 9.6 "
-            "frontend mixer to decide the first-login gate."
+            "5 keys (``cloze``, ``matching``, ``comprehension``, "
+            "``idiom``, ``phrase_match``); zero for absent types. "
+            "Used by the Phase 9.6 / 10.6 frontend mixer to decide "
+            "the first-login gate."
         ),
     )
 
@@ -464,15 +475,21 @@ class BaseExerciseFields(BaseModel):
     ...`` and inherit every field listed here.
     """
 
-    exercise_type: Literal["cloze", "matching", "comprehension", "idiom"] = Field(
+    exercise_type: Literal[
+        "cloze", "matching", "comprehension", "idiom", "phrase_match"
+    ] = Field(
         default="cloze",
         description=(
             "Wire discriminator. Phase 6.1 ships the cloze-only "
             "branch; matching + comprehension widen this literal "
             "in 6.2 / 6.4. Phase 8.3 (card t_fa86ac58) widens "
-            "again to include 'idiom' — this widening is "
-            "additive (Phase 7 hard rule #1 — Literal widening "
-            "is wire-level; never narrow)."
+            "to include 'idiom' — additive (Phase 7 hard rule "
+            "#1 — Literal widening is wire-level; never narrow). "
+            "Phase 10.2 (card t_5d91a7e7) widens again to include "
+            "'phrase_match' — same additive direction; the four "
+            "prior subclasses (ClozeExerciseOut, MatchingExerciseOut, "
+            "ComprehensionExerciseOut, IdiomExerciseOut) re-declare "
+            "their narrow literals unchanged."
         ),
     )
     target_word_id: int = Field(
@@ -1946,6 +1963,279 @@ class PhraseSeedRow(BaseModel):
             "(1168-1186)\"``). Always ``None`` in the 8.1 DWDS seed."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 10.1 (card t_18c90a68) — phrase_pair wire surface.
+#
+# ``phrase_pairs`` is the paired-row table that Phase 10.3's
+# ``/exercises/phrase_match`` endpoint reads from for nearest-
+# neighbor pulls (``enable_rag=True``). Phase 10.4 (Anurag) populates
+# ``backend/data/attested_pairs.json`` with Goethe/Schiller attested
+# pairs; Phase 10.1 just ships the wire shape, the seed script, and
+# the (empty) JSON scaffold so the script reads cleanly before 10.4.
+#
+# Hard rule (verbatim from the plan body): ``phrase_pairs`` is
+# read-only at runtime — no INSERT / UPDATE / ON CONFLICT DO UPDATE
+# from the FastAPI request path. The seed script is the single write
+# path (the same discipline as Phase 7.1 / 8.1 curated tables).
+#
+# Literal guardrails here mirror the Phase 7 / 8 dialect-agnostic
+# pattern: loose-String-on-the-DB, ``Literal`` at the wire layer.
+# ---------------------------------------------------------------------------
+
+
+# Phase 10.1 — 4-way relation literal (the same shape the plan body
+# ships verbatim). DB column stays loose String (the
+# ``phrase_pairs.relation`` column on ``app.models.PhrasePair``);
+# this Literal is the wire-level guardrail.
+PhrasePairRelation = Literal[
+    "equivalent", "paraphrase", "related", "unrelated"
+]
+
+
+def _is_phrase_pair_slug(value: str, *, field: str) -> str:
+    """Validate a phrase-pair slug FK (matches ``phrases.id``).
+
+    Mirrors the Phase 8.1 ``PhraseSeedRow.id`` discipline:
+    lowercase, hyphenated, 3-120 chars. The DB column is
+    ``phrases.id VARCHAR(120)`` so the upper bound is the same;
+    we tighten the slug-shape rules at the Pydantic layer so a
+    typo'd FK (e.g. a Capitalized slug) is caught at parse time
+    rather than at INSERT.
+
+    Raises ``ValueError`` with a parser-friendly message when the
+    value is not a valid slug.
+    """
+    import re
+
+    if not isinstance(value, str):
+        raise ValueError(
+            f"{field!r} must be a string slug, got {type(value).__name__}"
+        )
+    if len(value) < 3 or len(value) > 120:
+        raise ValueError(
+            f"{field!r} must be 3-120 chars (got len={len(value)})"
+        )
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value):
+        raise ValueError(
+            f"{field!r} must be lowercase-hyphenated ASCII slug "
+            f"(got {value!r})"
+        )
+    return value
+
+
+class PhrasePairSeedRow(BaseModel):
+    """Phase 10.1 — inbound shape for a single seed-script row.
+
+    Used by ``backend/scripts/seed_phrase_pairs.py`` to validate
+    the attested-pair override rows from
+    ``backend/data/attested_pairs.json`` before INSERT. Mirrors the
+    Phase 8.1 ``PhraseSeedRow`` discipline:
+
+    - ``phrase_a_id`` / ``phrase_b_id`` are slug FKs into
+      ``phrases.id`` — same slug shape (lowercase-hyphenated,
+      3-120 chars) the seed-script validator enforces. The plan
+      body explicitly requires this on the wire: any ``attested_pairs.json``
+      row whose slugs don't match an existing ``phrases.id`` value
+      fails with a ValueError here, *before* the row hits the DB.
+    - ``relation`` is the 4-way literal; the validator below
+      catches typos at parse time (same guardrail discipline as
+      ``frequency_band`` on ``PhraseSeedRow``).
+    - ``attested_pair`` defaults to ``False`` so the seed script's
+      ``ON CONFLICT (phrase_a_id, phrase_b_id) DO NOTHING`` path
+      can reuse this validator for the candidate-pool rows too.
+    - The hard rule ``phrase_a_id != phrase_b_id`` is enforced
+      here via the ``field_validator`` (the matching DB CHECK
+      constraint ships in the migration; the seed script also
+      pre-filters self-pairs before INSERT as belt-and-braces).
+
+    Wire contract (verbatim from the card body):
+
+    - ``phrase_a_id``: slug FK (lowercase-hyphenated, 3-120 chars).
+    - ``phrase_b_id``: slug FK, distinct from ``phrase_a_id``.
+    - ``relation``: one of
+      ``{"equivalent","paraphrase","related","unrelated"}``.
+    - ``attested_pair``: bool, default ``False``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    phrase_a_id: str = Field(
+        ...,
+        description=(
+            "Slug FK into ``phrases.id``. Lowercase-hyphenated "
+            "ASCII, 3-120 chars. Must match an existing ``phrases.id`` "
+            "value at INSERT time (the seed script enforces this)."
+        ),
+    )
+    phrase_b_id: str = Field(
+        ...,
+        description=(
+            "Slug FK into ``phrases.id``. Same shape as "
+            "``phrase_a_id``. Hard rule: must be distinct from "
+            "``phrase_a_id`` (the DB has a CHECK constraint; this "
+            "validator catches the violation at Pydantic parse time)."
+        ),
+    )
+    relation: PhrasePairRelation = Field(
+        ...,
+        description=(
+            "4-way relation literal. ``equivalent`` is the "
+            "near-synonymous band; ``paraphrase`` is same-meaning-"
+            "different-surface; ``related`` is theme- or register-"
+            "adjacent; ``unrelated`` anchors the negative-cohort "
+            "distractor surface."
+        ),
+    )
+    attested_pair: bool = Field(
+        default=False,
+        description=(
+            "``True`` for Goethe/Schiller attested-pair override "
+            "rows from ``attested_pairs.json`` (Phase 10.4); "
+            "``False`` for the seed-script's bge-m3-bucketed rows."
+        ),
+    )
+
+    @field_validator("phrase_a_id")
+    @classmethod
+    def _check_phrase_a_slug(cls, v: str) -> str:
+        return _is_phrase_pair_slug(v, field="phrase_a_id")
+
+    @field_validator("phrase_b_id")
+    @classmethod
+    def _check_phrase_b_slug(cls, v: str) -> str:
+        return _is_phrase_pair_slug(v, field="phrase_b_id")
+
+    @field_validator("relation", mode="before")
+    @classmethod
+    def _check_relation(cls, v):
+        if not isinstance(v, str):
+            raise ValueError(
+                f"relation must be a string (got {type(v).__name__})"
+            )
+        if v not in (
+            "equivalent", "paraphrase", "related", "unrelated"
+        ):
+            raise ValueError(
+                f"relation must be one of "
+                f"'equivalent'|'paraphrase'|'related'|'unrelated' "
+                f"(got {v!r})"
+            )
+        return v
+
+    @field_validator("phrase_b_id")
+    @classmethod
+    def _check_distinct_pair(cls, v: str, info):
+        # Cross-field check: ``phrase_a_id`` != ``phrase_b_id``.
+        # This mirrors the DB CHECK constraint at the Pydantic
+        # layer so the seed script catches self-pairs BEFORE
+        # building the INSERT statement. The validation uses
+        # ``info.data`` (Pydantic v2) so it's peer-of-the-other-
+        # field rather than order-dependent.
+        a = info.data.get("phrase_a_id") if info.data else None
+        if a is not None and v == a:
+            raise ValueError(
+                "phrase_a_id and phrase_b_id must be distinct "
+                f"(got both = {v!r})"
+            )
+        return v
+
+
+class PhrasePairOut(BaseModel):
+    """Phase 10.1 — outbound view of a single ``phrase_pairs`` row.
+
+    Wire-level fields mirror the SQLAlchemy model column-for-
+    column. The ``id`` field is the autoincrement integer PK; the
+    FKs are exposed as slug strings (same shape as
+    ``phrases.id``). ``relation`` is the validated 4-way literal
+    (this is the wire layer's contract — the DB stores a loose
+    String, so the validator below hardens it at parse time).
+
+    ``created_at`` is exposed because Phase 10.3's audit surface
+    (not in this card) may want to filter by insertion batch —
+    same shape as ``PhraseOut`` for consistency.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    phrase_a_id: str
+    phrase_b_id: str
+    relation: PhrasePairRelation
+    attested_pair: bool
+    created_at: datetime
+
+    @field_validator("relation", mode="before")
+    @classmethod
+    def _check_relation(cls, v):
+        if not isinstance(v, str):
+            raise ValueError(
+                f"relation must be a string (got {type(v).__name__})"
+            )
+        if v not in (
+            "equivalent", "paraphrase", "related", "unrelated"
+        ):
+            raise ValueError(
+                f"relation must be one of "
+                f"'equivalent'|'paraphrase'|'related'|'unrelated' "
+                f"(got {v!r})"
+            )
+        return v
+
+
+class PhrasePairSeedManifest(BaseModel):
+    """Phase 10.1 — wrapper for the seed-script CLI input.
+
+    The seed script reads ``backend/data/attested_pairs.json``
+    (the JSON object ``{"pairs": [...]}``) and validates every
+    entry against ``PhrasePairSeedRow``. The wrapper shape is
+    the JSON manifest's top-level ``{"pairs": [...]}`` form so
+    future fields (e.g. a global ``description``) don't have to
+    reshape the file.
+
+    - ``pairs``: list of seed rows. May be empty (Phase 10.4
+      hasn't shipped yet — the JSON ships with ``"pairs": []``
+      in 10.1 and grows as Anurag labels attested pairs).
+    - ``attested_pairs_filename``: the relative path the seed
+      script resolves against ``backend/data/``. Defaults to
+      ``"attested_pairs.json"`` so callers don't have to repeat
+      the filename.
+    """
+
+    pairs: list[PhrasePairSeedRow] = Field(
+        default_factory=list,
+        description=(
+            "Attested-pair rows (Phase 10.4 — Goethe/Schiller). "
+            "Each row is validated against ``PhrasePairSeedRow`` "
+            "at parse time. Empty list is the 10.1 starting state."
+        ),
+    )
+    attested_pairs_filename: str = Field(
+        default="attested_pairs.json",
+        description=(
+            "Filename resolved by the seed script relative to "
+            "``backend/data/``. Defaults to ``attested_pairs.json``."
+        ),
+    )
+
+    @field_validator("attested_pairs_filename")
+    @classmethod
+    def _check_filename(cls, v: str) -> str:
+        # Cheap guard: the filename shouldn't contain path
+        # separators (it's resolved relative to ``backend/data/``
+        # at the seed-script boundary, never absolute). The seed
+        # script enforces this too.
+        if "/" in v or "\\" in v:
+            raise ValueError(
+                f"attested_pairs_filename must be a bare filename "
+                f"(no path separators), got {v!r}"
+            )
+        if not v.strip():
+            raise ValueError("attested_pairs_filename must be non-empty")
+        return v
+
+
 # ---------------------------------------------------------------------------
 # Phase 8.3 (card t_fa86ac58) — Idiom exercise wire surface.
 #
@@ -2267,3 +2557,342 @@ class IdiomGenerateRequest(BaseModel):
         ),
     )
 
+
+# -----------------------------------------------------------------------------
+# Phase 10.2 (card t_5d91a7e7) — Phrase Match exercise wire surface.
+#
+# This card ships the ``PhraseMatchExerciseOut`` response shape and
+# the ``PhraseMatchGenerateRequest`` request body for the future
+# ``POST /exercises/phrase_match`` endpoint (10.3).
+#
+# Hard rules carried forward verbatim from Phase 8.3 (per Phase 7 hard
+# rule #1 — Literal widening is wire-level):
+#
+# - **Literal widening is additive.** The ``BaseExerciseFields``
+#   literal widens from 4 to 5 (adds ``"phrase_match"``). The new
+#   ``PhraseMatchExerciseOut`` subclass narrows the discriminator
+#   locally to ``Literal["phrase_match"]``; the four prior subclasses
+#   (Cloze / Matching / Comprehension / Idiom) re-declare their
+#   narrow literals unchanged. Adding the 5th value is additive —
+#   existing callers parse as before.
+# - **No frontend work in Phase 10.2.** The 10.5 / 10.6 frontend
+#   cards consume the wire surface but are out of scope here.
+# - **``phrase_pairs`` is read-only at runtime.** LLM-curated phrase
+#   generation is deferred; the DSPy module reads ``phrase_pairs``
+#   for the ``enable_rag=True`` nearest-neighbor path but never
+#   writes. The seed scripts (10.1) are the only write path.
+# -----------------------------------------------------------------------------
+
+# Closed source-attribution literal for phrase-match. Mirrors the
+# 8.3 idiom shape but adds ``"bge-m3-cosine"`` for the RAG-on
+# nearest-neighbor path (Phase 7.5 cosine distance). The phrase
+# pairs that surface from the bge-m3 embedding path are attributed
+# to ``"bge-m3-cosine"``; curated-table pairs attribute to the
+# raw seed source. Same comma-joined-subset + token-by-token
+# validation pattern as IdiomSourceAttribution above.
+PhraseMatchSourceAttribution = Literal[
+    "dwds", "goethe", "schiller", "bge-m3-cosine"
+]
+
+# Closed 4-way relation literal — the LLM picks one of these as
+# the pair relation. Phase 10.2 spec §"Pydantic contract":
+#
+#   - equivalent: phrase_a and phrase_b are dictionary-synonyms
+#     (e.g. "ins Blaue hinein" — "ohne festes Ziel").
+#   - paraphrase: surface variation with the same meaning (e.g.
+#     "Tomaten auf den Augen haben" — "etwas Offensichtliches
+#     nicht sehen").
+#   - related: same semantic domain, complementary meaning
+#     (e.g. "das Eis brechen" — "Fauxpas begehen" — both idioms,
+#     different semantics).
+#   - unrelated: no semantic relation; the pair is a negative
+#     example pulled from the curated ``phrase_pairs`` table.
+PhrasePairRelation = Literal[
+    "equivalent", "paraphrase", "related", "unrelated"
+]
+
+
+class PhraseMatchExerciseOut(BaseExerciseFields):
+    """Phase 10.2 — response shape for ``POST /exercises/phrase_match`` (10.3).
+
+    Inherits the shared ``BaseExerciseFields`` (Phase 6.1) and
+    adds the phrase-match-specific fields from
+    ``app.phrase_match.PhraseMatchExercise``. Like the four
+    prior exercise response models, the ``exercise_type``
+    literal is narrowed on this subclass to
+    ``Literal["phrase_match"]`` so a
+    ``PhraseMatchExerciseOut(exercise_type="cloze")`` is rejected
+    at the Pydantic layer (the discriminator is the type-level
+    gate — Phase 7 hard rule #1).
+
+    Field bounds (locked by the 10.2 card body and
+    ``app.phrase_match.PhraseMatchExercise``):
+
+    - ``exercise_id``: server-minted signed 8-byte int
+      (Phase 5.3 / 6.x convention; same shape as the four prior
+      response models). The 10.3 route layer stamps it via
+      ``int.from_bytes(os.urandom(8), "big", signed=True)``.
+      The same id re-appears on the ``grade_logs`` row for the
+      same exercise (Phase 9 follow-up) so the offline A/B eval
+      is deterministic.
+    - ``word_id``: pair-selector seed echoed from the request —
+      same integer value as ``target_word_id``. Kept as a
+      top-level field on this response (alongside
+      ``target_word_id``) for cross-exercise-type consumer
+      symmetry — Phase 9's study-session mixer reads the
+      canonical name. Note: ``word_id`` is NOT a ``words.id``
+      FK for phrase-match (the 10.2 card body documents this
+      — same discipline as Phase 8.3 idiom where the input
+      field name is uniform but its semantic role is
+      *pair-selector seed*).
+    - ``phrase_a``: 5..200 chars — the first phrase of the pair
+      (verbatim from the selected ``phrases`` row).
+    - ``phrase_b``: 5..200 chars — the second phrase of the pair
+      (verbatim from the selected ``phrases`` row).
+    - ``relation``: closed 4-way ``Literal`` from
+      ``PhrasePairRelation`` — the LLM-assigned pair relation.
+    - ``relation_rationale``: 1..400 chars — learner-facing
+      explanation of why the LLM picked ``relation``. Same
+      1..400-char bound as the 8.3 ``definition`` field
+      (compressed learner-friendly gloss; mirrors the Phase 8
+      idiom schema's compression discipline).
+    - ``source_attribution``: comma-joined subset of
+      ``{dwds, goethe, schiller, bge-m3-cosine}`` — same
+      pattern as the 8.3 idiom source attribution; the new
+      ``"bge-m3-cosine"`` token surfaces RAG-on nearest-
+      neighbor pulls.
+
+    ``prompt_template_version`` mirrors the ``BaseExerciseFields``
+    contract — always equals ``phrase-match-v1`` for production
+    generations, the A/B key for offline eval (Phase 10.4
+    hand-labeled eval set).
+    """
+
+    # Narrow the discriminator on this subclass — the local
+    # narrowing doesn't bleed through the ``BaseExerciseFields``
+    # base class (which now widens to 5 literals on the wire).
+    exercise_type: Literal["phrase_match"] = Field(
+        default="phrase_match",
+        description=(
+            "Wire discriminator. Always ``\"phrase_match\"`` on "
+            "this response. Phase 10.2 widens the "
+            "``BaseExerciseFields`` literal to include "
+            "``\"phrase_match\"`` so a phrase-match endpoint can "
+            "sit alongside cloze / matching / comprehension / "
+            "idiom (Hard rule #1 — Literal widening is additive)."
+        ),
+    )
+
+    # Phase 10.3 — wire-level ``exercise_id`` is a server-minted
+    # signed 8-byte int, mirroring the four prior response
+    # models. The generator-side ``PhraseMatchExercise`` (in
+    # ``app.phrase_match``) carries the same int (the LLM is
+    # asked to echo a placeholder); the route layer (in
+    # ``app.main``) mints the final wire int.
+    exercise_id: int = Field(
+        ...,
+        description=(
+            "Server-minted per generation id (signed 8-byte "
+            "int, non-zero). Phase 5.3 / 6.x convention; same "
+            "shape as the four prior response models. The same "
+            "id re-appears on the ``grade_logs`` row (Phase 9 "
+            "follow-up) so the offline A/B eval is deterministic."
+        ),
+    )
+    # ``word_id`` is the request-side pair-selector seed echoed
+    # on the response. Same integer value as ``target_word_id``;
+    # both fields are kept for forward compatibility —
+    # ``target_word_id`` is the cross-exercise canonical name
+    # (Phase 6.1 mixin), ``word_id`` is the request-shape name
+    # (the 10.3 test suite reads it directly to confirm
+    # request / response echo semantics). NOT a ``words.id``
+    # FK for phrase-match — see ``app.phrase_match.select_phrase_pair``
+    # docstring for the pair-selector-seed discipline.
+    word_id: int = Field(
+        ...,
+        description=(
+            "Pair-selector seed echoed from the request. Same "
+            "numerical value as ``target_word_id``. Phase 9's "
+            "study-session mixer reads ``word_id`` as the "
+            "canonical name (Phase 10.2 widens phrase-match to "
+            "match the cloze / matching / comprehension / idiom "
+            "wire shapes). NOT a ``words.id`` FK — it's an "
+            "integer used by ``select_phrase_pair`` to pick a "
+            "deterministic ``phrase_pairs`` row."
+        ),
+    )
+    phrase_a: str = Field(
+        ...,
+        min_length=5,
+        max_length=200,
+        description=(
+            "First phrase of the pair (verbatim from the "
+            "selected ``phrases`` row). 5..200 chars mirrors "
+            "the 8.3 ``phrase`` bound so a single pair's "
+            "phrases share the same wire contract."
+        ),
+    )
+    phrase_b: str = Field(
+        ...,
+        min_length=5,
+        max_length=200,
+        description=(
+            "Second phrase of the pair (verbatim from the "
+            "selected ``phrases`` row). 5..200 chars mirrors "
+            "the 8.3 ``phrase`` bound so a single pair's "
+            "phrases share the same wire contract."
+        ),
+    )
+    relation: PhrasePairRelation = Field(
+        ...,
+        description=(
+            "Closed 4-way relation literal chosen by the LLM "
+            "(equivalent / paraphrase / related / unrelated). "
+            "Pydantic rejects any other value at the wire "
+            "layer (Phase 7 hard rule #1)."
+        ),
+    )
+    relation_rationale: str = Field(
+        ...,
+        min_length=1,
+        max_length=400,
+        description=(
+            "Learner-facing rationale for the chosen "
+            "``relation`` (1..400 chars). Same compression "
+            "discipline as the 8.3 ``definition`` field — "
+            "forces the generator to compress long "
+            "nearest-neighbor explanations into learner-"
+            "friendly glosses via the prompt."
+        ),
+    )
+    source_attribution: str = Field(
+        ...,
+        description=(
+            "Comma-joined subset of "
+            "``Literal['dwds','goethe','schiller','bge-m3-cosine']``. "
+            "The ``'bge-m3-cosine'`` token is the 10.2 RAG-on "
+            "nearest-neighbor pull source (Phase 7.5 cosine "
+            "path); curated-table pairs attribute to the raw "
+            "seed source (``'dwds'`` / ``'goethe'`` / "
+            "``'schiller'``). Validated token-by-token by "
+            "``_validate_source_attribution`` below."
+        ),
+    )
+
+    @field_validator("source_attribution")
+    @classmethod
+    def _validate_source_attribution(cls, v: str) -> str:
+        """Enforce the closed-literal invariant on the joined string.
+
+        Mirrors ``IdiomExerciseOut._validate_source_attribution``
+        byte-for-byte, plus one extra allowed token
+        (``"bge-m3-cosine"``) for the 10.2 RAG path. Comma-joined
+        subsets are allowed (``"dwds,bge-m3-cosine"``); each
+        comma-separated token must be one of the four literals;
+        whitespace around the separator is rejected (canonical
+        wire form has zero whitespace); trailing / leading
+        separators canonicalize away (``"dwds,"`` → ``"dwds"``);
+        de-dupes while preserving first-appearance order.
+        """
+        if not v or not v.strip():
+            raise ValueError(
+                "source_attribution must be a non-empty "
+                "comma-joined subset of "
+                "'dwds','goethe','schiller','bge-m3-cosine'"
+            )
+        # Reject any leading/trailing whitespace on the whole
+        # string (" dwds,goethe", "dwds,goethe ").
+        if v != v.strip():
+            raise ValueError(
+                "source_attribution must not have leading or "
+                "trailing whitespace"
+            )
+        # Detect whitespace around a non-empty separator chunk
+        # BEFORE we strip per-token.
+        chunks = v.split(",")
+        for chunk in chunks:
+            if chunk and chunk != chunk.strip():
+                raise ValueError(
+                    "source_attribution has whitespace around "
+                    "the separator — use canonical 'tok1,tok2'"
+                )
+        # Strip per-token whitespace and drop empty chunks.
+        tokens = [t.strip() for t in chunks if t.strip()]
+        if not tokens:
+            raise ValueError(
+                "source_attribution must contain at least one token"
+            )
+        valid = ("dwds", "goethe", "schiller", "bge-m3-cosine")
+        invalid = [t for t in tokens if t not in valid]
+        if invalid:
+            raise ValueError(
+                f"source_attribution tokens {invalid!r} are outside "
+                f"the closed literal {list(valid)}"
+            )
+        # De-dupe + preserve order on first appearance.
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for t in tokens:
+            if t not in seen:
+                seen.add(t)
+                deduped.append(t)
+        return ",".join(deduped)
+
+
+class PhraseMatchGenerateRequest(BaseModel):
+    """Request body for ``POST /exercises/phrase_match`` (Phase 10.3).
+
+    ``word_id`` is the pair-selector seed — same shape as the
+    8.4 ``IdiomGenerateRequest`` (Phase 8.3 idiom mirror), but
+    for phrase-match the input field name stays uniform
+    (``word_id``) while its semantic role is *pair-selector
+    seed* (not a ``words.id`` FK). The 10.3 route mirrors the
+    ``IdiomGenerateRequest`` discipline: empty bodies fail with
+    HTTP 422 because ``word_id`` is required.
+
+    ``enable_rag`` is a ``StrictBool`` — string ``"true"`` and
+    integer ``1`` are rejected with HTTP 422 by FastAPI's
+    Pydantic layer (Phase 7 hard rule #5 carried forward).
+    When ``True``, the generator pulls the top-3 nearest-
+    neighbor pairs from the curated ``phrase_pairs`` table
+    (Phase 7.5 cosine path, local ``sentence-transformers`` —
+    NOT OpenRouter chat) and embeds them in the DSPy signature
+    as ``few_shot_examples``. When ``False`` (default), the
+    prompt is the curated-only shape — byte-for-byte
+    reproducible for A/B comparison.
+    """
+
+    word_id: int = Field(
+        ...,
+        gt=0,
+        description=(
+            "Pair-selector seed for ``select_phrase_pair`` "
+            "(NOT a ``words.id`` FK). Required because the "
+            "deterministic selector needs an integer to map "
+            "to a ``phrase_pairs`` row — same integer → same "
+            "pair across calls (no shuffling). When the seeded "
+            "row count is zero (10.1 seed hasn't run yet), the "
+            "generator raises ``PhrasePairNotFoundError`` and "
+            "the route layer translates to HTTP 404 — mirrors "
+            "the 8.4 ``IdiomGenerateRequest`` / "
+            "``IdiomNotFoundError`` discipline for missing-"
+            "selector input."
+        ),
+    )
+    enable_rag: bool = Field(
+        default=False,
+        strict=True,
+        description=(
+            "Phase 10.2 — opt-in flag for the retrieval-"
+            "augmented phrase-match prompt path. When ``True``, "
+            "the generator embeds up to 3 nearest-neighbor "
+            "``phrase_pairs`` rows (Phase 7.5 cosine path, "
+            "local ``sentence-transformers``) in the DSPy "
+            "signature as ``few_shot_examples``. When ``False`` "
+            "(default), the prompt is the curated-only shape "
+            "— byte-for-byte reproducible for A/B comparison. "
+            "Hard rule: retrieval is local sentence-transformers; "
+            "NO chat-model API call to OpenRouter for embedding "
+            "or nearest-neighbor pull."
+        ),
+    )

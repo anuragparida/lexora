@@ -159,14 +159,38 @@ Frequency distribution (vocabeo's 1-5 scale): heavy skew toward 3-4.
 
 ## Future direction — three credible paths
 
-**A. In-app spaced repetition (kill Anki dependency).**
-The empty `fsrs_cards` table is a tell. Add `ts-fsrs` (or `py-fsrs` server-side), wire up the table, build a review screen in the frontend. Real product, but you now own the review loop forever.
+**A. Phrase-to-phrase matching — DONE (Phase 10).** The
+`phrases` table from Phase 8.1 was the planted surface; Phase 10
+widens it to a pairwise judgment surface via `phrase_pairs` (a
+deterministic-seeding curated table, *not* LLM-written; the
+pairing rule lives in `backend/scripts/seed_phrase_pairs.py
+--seed 42`). Wire-level exercise surface is five types now:
+`cloze`, `matching`, `comprehension`, `idiom`, `phrase_match`.
+The Phase 8 deferral ("LLM-curated phrase generation is its
+own multi-card phase") is honored — Phase 10 *reads* from
+`phrase_pairs`, never writes. Cross-language phrase-to-phrase
+matching and phrase-to-context matching (6th type) remain
+deferred indefinitely.
 
-**B. Better data layer — vocab that's actually learned, not just scraped.**
-No audio, no IPA, no native-speaker sentences, no collocations, no frequency-by-genre. The word list is the ceiling on this app's value. Pro: 10x corpus quality. Con: expensive data work.
+**B. In-app audio / IPA / native-speaker sentences — still
+deferred.** The `words` table doesn't have audio columns; Path B
+is its own multi-card phase. The schema-curated corpus in the
+shipped SQLite DB (`backend/data/vocabeo_words.db`) is the
+ceiling on this app's value until audio/IPA land. No audio
+columns, no IPA strings, no native-speaker attestations. The
+Phase 10 surface widens the *exercise* space, not the *corpus*
+space.
 
-**C. Personalization + progress tracking.**
-Auth, mark words as known/unknown, track which examples they got wrong, generate review sessions from "unknown" + "due" cards. The infrastructure for this (fsrs table, is_complete flag, conjugation_id) is *already in the schema* — it just needs the surface.
+**C. Personalization + progress tracking — still deferred.**
+The `fsrs_cards.exercise_type` column (Phase 9.1) is the
+planted surface, but Path C's deeper personalization
+(preference weights, leech detection, interval modifiers,
+in-app SRS review loop) is its own multi-card phase. The
+Phase 5.3 grade state machine is the surface today. The
+`fsrs_cards` table exists but is still empty; the
+`is_complete` flag is unwired; no `known_words` /
+`unknown_words` marker. Phase 10 ships no new personalization
+surface.
 
 **My pick if you're energy-constrained:** C. Pair it with the App.tsx split. The schema is already pointing there.
 
