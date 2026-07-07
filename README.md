@@ -474,73 +474,100 @@ pnpm dev
 | POST | `/exercises/cloze` | Generate one cloze exercise for the logged-in learner (Phase 4.2 + Phase 6.1 + Phase 7.3 collocation + Phase 7.4 partner_lang; auth-gated; accepts optional `{"enable_rag": bool, "collocation": bool, "partner_lang": "de"|"en"}` body) |
 | POST | `/exercises/match` | Generate one matching exercise (`count` pairs, default 4, range `[2, 8]`; accepts optional `{"count": int, "enable_rag": bool, "partner_lang": "de"|"en"}` body; Phase 6.2 + Phase 6.3 + Phase 7.4 bilingual; auth-gated) |
 | POST | `/exercises/comprehension` | Generate one comprehension exercise (3–5 sentence passage + multiple-choice question; accepts optional `{"enable_rag": bool}` body; Phase 6.4 + Phase 6.5; auth-gated) |
-| POST | `/exercises/grade` | Persist a grade for a generated exercise; `exercise_type` widened to `Literal["cloze", "matching", "comprehension"]` in Phase 6.6 (Phase 5.3 route + Phase 6.6 widening; auth-gated) |
+| POST | `/exercises/grade` | Persist a grade for a generated exercise; `exercise_type` widened to `Literal["cloze", "matching", "comprehension", "idiom", "phrase_match"]` in Phase 10.3 (Phase 5.3 route + Phase 6.6 widening + Phase 8.3 idiom + Phase 10.3 phrase_match; auth-gated) |
+| POST | `/exercises/phrase_match` | Generate one phrase-match exercise (4-button relation picker answer + 3-button FSRS grade self-assessment; accepts `{"enable_rag": bool, "word_id": int}` body; Phase 10.3 `PhraseMatchExerciseOut` (`phrase_a`, `phrase_b`, `relation`, `relation_rationale`, `source_attribution`); auth-gated) |
 
-## Limitations (Phase 9)
+## Limitations (Phase 10)
 
-Phase 9 (pending fold): frontend study-session UI mixing all
-four exercise types in one flow; matching + comprehension DSPy
-optimizer scripts (mirrors of the Phase 4.4 cloze optimizer);
-widened first-login gate; Alembic migration adding
-`fsrs_cards.exercise_type`. Builds on `perseus/9-*` branches;
-see plan card `t_6e784cf1` for the per-card spec. The honest
-constraints at this snapshot:
+Phase 10 (pending fold): phrase-to-phrase matching exercise
+type, widening the wire-level surface from four types to five;
+a curated `phrase_pairs` table seeded deterministically; a
+`POST /exercises/phrase_match` endpoint; the `SessionPage.tsx`
+mixer routes `phrase_match` cards to `PhraseMatchPage.tsx`; a
+fourth DSPy optimizer script (`scripts/optimize_phrase_match.py`).
+Builds on `perseus/10-*` branches; see plan card `t_e2a27748`
+for the per-card spec. The honest constraints at this snapshot:
 
 - **Phase 7.5 retrieval-quality A/B verdict still holds:**
   `no_significant_lift` between phrase-on and phrase-off on
   `context_precision`, `context_recall`, `faithfulness`,
-  `answer_relevance` for the v80 held-out cloze set. Phase 9
-  does not re-run the A/B. The Phase 8 phrase-table change is a
-  parallel surface (a new `phrases` table seeded from DWDS
-  Idiome), not a deeper one; the noun-phrase retrieval space is
-  unchanged. Run `make eval-retrieval-compare` to refresh the
-  per-row CSVs (`eval/retrieval_compare/current_per_row.csv` +
+  `answer_relevance` for the v80 held-out cloze set. Phase 10
+  does NOT re-run the A/B. The Phase 10 `phrase_pairs` table is
+  a parallel surface to `phrases` / `collocations` /
+  `prepositional_objects`, not a deeper one; it widens the
+  exercise surface, not the retrieval space. The noun-phrase
+  retrieval space is unchanged. Run `make eval-retrieval-compare`
+  to refresh the per-row CSVs
+  (`eval/retrieval_compare/current_per_row.csv` +
   `bge_m3_per_row.csv`) and the markdown report
   (`eval/retrieval_compare/retrieval_compare_report.md`); the
   `RETRIEVAL_MIN_QUALITY_FLOOR = 0.05` is a hard-coded module
   constant in `backend/app/eval/retrieval_compare.py` (Hard rule
   #7 — no env-derived thresholds).
-- **Wire-level exercise surface is four types:**
-  `Literal["cloze", "matching", "comprehension", "idiom"]` from
-  Phase 8.3's widening, plus the four `POST /exercises/{type}`
-  endpoints from 6.2, 6.5, 8.4. The schema-curated tables stay
-  hand-curated: collocations + prepositional-objects (7.1) and
-  phrases + phrase-attestations (8.1, 8.2) are written by the
+- **Wire-level exercise surface is five types:**
+  `Literal["cloze", "matching", "comprehension", "idiom",
+  "phrase_match"]` from Phase 10.3's widening, plus the five
+  `POST /exercises/{type}` endpoints from 6.2, 6.5, 8.4, 10.3.
+  The schema-curated tables stay hand-curated: collocations +
+  prepositional-objects (7.1), phrases + phrase-attestations
+  (8.1, 8.2), and `phrase_pairs` (10.1, 10.2) are written by the
   seed scripts, never by runtime. No `INSERT`, no `UPDATE`, no
-  `ON CONFLICT` writes from the generators.
+  `ON CONFLICT` writes from the generators. **`phrase_pairs` is
+  a deterministic-seeding curated surface, NOT LLM-written.**
+  The pairing rule lives in code
+  (`backend/scripts/seed_phrase_pairs.py --seed 42`), not in a
+  DSPy signature output. This is the Phase 8 explicit deferral
+  ("LLM-curated phrase generation is its own multi-card phase"),
+  honored as a content deferral, not a bug.
 - **Frontend study-session UI at `/exercises/session`:** the
   mixer page renders one card at a time, picks the next card
   from the union of `fsrs_cards` where `due_date <= now` filtered
-  by a per-row `exercise_type` (new column, Phase 9.1 Alembic
-  migration). The gate that lands users there is widened:
-  `frontend/src/routing/postAuthRoute.ts` routes to
-  `/exercises/session` (not cloze-only `/exercises/due`) when
-  the user has due cards of *any* type. **This OFFENDS Phase 6
-  hard rule #11** ("the first-login gate stays cloze-only");
-  named here on purpose. The Phase 9 plan card (`t_6e784cf1`)
-  is the documented exception.
-- **DSPy optimizer coverage is three of four.**
+  by a per-row `exercise_type`. Phase 10.6 widens the routing to
+  include the fifth type: `SessionPage.tsx` routes `phrase_match`
+  cards to `PhraseMatchPage.tsx` (Phase 10.5). The 4-button
+  relation picker (equivalent / paraphrase / related / unrelated)
+  is the answer surface; the 3-button FSRS grade is the
+  self-assessment. The two are stored in distinct fields
+  (`relation` vs. `grade`). The Phase 9 gate widening (to any
+  type) carries forward; **this still OFFENDS Phase 6 hard rule
+  #11** ("the first-login gate stays cloze-only"); named here on
+  purpose. The Phase 9 plan card (`t_6e784cf1`) is the
+  documented exception; Phase 10 is the surface widening on top
+  of it.
+- **DSPy optimizer coverage is four of four.**
   BootstrapFewShot / MIPROv2 runs against the held-out sets for
   cloze (Phase 4.4, `scripts/optimize_cloze.py`), matching
-  (Phase 9.3, `scripts/optimize_match.py`), and comprehension
-  (Phase 9.4, `scripts/optimize_comprehension.py`). The idiom
-  path stays unoptimized: a 1-question-per-call generator that
-  doesn't justify the BootstrapFewShot overhead. The three
-  optimizer scripts share the Phase 4.4 template, with the same
-  `DummyLM` discipline, the same offline dry-run default, the
-  same Ragas-floor gate before any live run. Phase 9 mirrors
-  the cloze optimizer 2x; it does not introduce a new DSPy
-  paradigm.
-- **What stayed out of Phase 9 (the honest discipline bar from
-  NOTES.md).** No fifth exercise type. The `Literal` stays at
-  four entries; phrase-to-phrase matching is Phase 10. No
-  in-app audio / IPA / native-speaker sentences. Path B from
-  NOTES.md is its own multi-card phase. No widening of the FSRS
-  algorithm. The Phase 5.3 grade state machine is the surface;
-  preference weights, interval modifiers, and leech detection
-  are deferred. No re-run of the Phase 7.5 A/B. Phase 9 is
-  wiring + UI, not new backend surface; the four generator
-  endpoints stay on their existing wire contract.
+  (Phase 9.3, `scripts/optimize_match.py`), comprehension
+  (Phase 9.4, `scripts/optimize_comprehension.py`), and phrase
+  match (Phase 10.7, `scripts/optimize_phrase_match.py`). The
+  idiom path stays unoptimized as before; the four optimizer
+  scripts share the Phase 4.4 template, with the same `DummyLM`
+  discipline, the same offline dry-run default, the same
+  Ragas-floor gate before any live run. Phase 10 mirrors the
+  cloze optimizer 1x; it does not introduce a new DSPy paradigm.
+- **Phase 1.5a eval-set honesty discipline still holds.**
+  The 50 hand-labeled phrase-match pairs are tagged
+  `HUMAN-LABELED` in the eval manifest (Phase 10.4's discipline).
+  The Phase 1.5a precedent — LLM-generated eval sets get tagged
+  as such; hand-labeled is the rare exception — is honored.
+  No LLM-vs-human agreement claim is made on this set; the
+  optimization signal is the hand-labeled grader, full stop.
+- **What stayed out of Phase 10 (the honest discipline bar from
+  NOTES.md).** No sixth exercise type. The `Literal` stays at
+  five entries; phrase-to-context matching is deferred
+  indefinitely. No LLM-writes-back to `phrase_pairs` — the
+  Phase 8 deferral holds; Phase 10 *reads* from `phrase_pairs`,
+  never writes. No cross-language phrase-to-phrase (deferred
+  indefinitely per plan body). No in-app audio / IPA /
+  native-speaker sentences — Path B from NOTES.md is its own
+  multi-card phase. No widening of the FSRS algorithm. The
+  Phase 5.3 grade state machine is the surface; preference
+  weights, interval modifiers, and leech detection are
+  deferred (Path C, its own multi-card phase). No re-run of
+  the Phase 7.5 A/B. No `bge-m3` OpenRouter chat call —
+  `phrase_pairs` uses local `sentence-transformers` for the
+  nearest-neighbor pull at request time, not OpenRouter. The
+  Phase 7.5 verdict (`no_significant_lift`) carries forward.
 
 ## Generating Anki decks
 
