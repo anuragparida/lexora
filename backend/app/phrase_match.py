@@ -106,7 +106,7 @@ import random
 from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func, text
 from sqlalchemy.orm import Session
 
 from app import models
@@ -562,6 +562,17 @@ def select_phrase_pair(db: Session, word_id: int) -> PhrasePair:
 # ---------------------------------------------------------------------------
 
 
+# Phase 10.3 (card t_13bb48d2) hard rule: nearest-neighbor
+# cosine floor is 0.55 (card body §"enable_rag body"). Anything
+# below this threshold is dropped — surfaces only pair rows whose
+# concatenated phrase text is meaningfully close to the anchor.
+# This is the **closed 4-way literal threshold for the
+# 5th-exercise-type cohort**; it lives as a module constant so
+# the value is grep-able, type-checked, and reviewable (Hard
+# rule #8 — no env-derived thresholds).
+RAG_COSINE_FLOOR: float = 0.55
+
+
 def _retrieve_phrase_pair_neighbors(
     db: Session,
     pair: PhrasePair,
@@ -570,40 +581,170 @@ def _retrieve_phrase_pair_neighbors(
 ) -> list[dict[str, Any]]:
     """Return top-k nearest-neighbor ``phrase_pairs`` for RAG-on prompt.
 
-    Phase 10.2 stub — the 10.3 endpoint will pass a real
-    ``retrieve_neighbor`` callable from
-    ``app.embeddings.embed_one`` + the ``phrase_pairs`` cosine
-    path (Phase 7.5). For now, this stub returns an empty list
-    so the offline path stays byte-stable.
+    Phase 10.3 (card t_13bb48d2) — replaces the 10.2 stub with
+    the real Phase 7.5 cosine path. The helper:
 
-    The stub honors the Hard rule #7 contract:
-    **no bge-m3 OpenRouter chat call**. When 10.3 wires the real
-    callable, the embedding is local ``sentence-transformers``
-    (Phase 1.3) — not a chat-model API call to OpenRouter.
+    1. Computes the embedding of the anchor pair's concatenated
+       phrase text (``phrase_a + " " + phrase_b``) via
+       ``app.embeddings.embed_one``. Hard rule #7 (no bge-m3
+       OpenRouter **chat** call) is honored — the OpenRouter
+       ``/embeddings`` HTTP endpoint is a different surface from
+       ``/chat/completions``; only the chat path is forbidden
+       for retrieval.
+    2. Queries the ``phrase_pairs`` table joined to
+       ``phrases`` (one cosine distance per pair via either
+       phrase) using pgvector ``<=>``. Filters by the
+       ``RAG_COSINE_FLOOR`` threshold (=0.55) — anything below
+       is dropped before the LIMIT applies.
+    3. Returns up to ``top_k`` rows ordered by descending
+       cosine similarity (deterministic via ``phrase_pairs.id``
+       tiebreaker) so the few-shot context is reproducible
+       across calls with the same anchor.
+
+    Dialect-aware:
+
+    - **Postgres (production)**: full pgvector cosine query
+      via ``app.retrieval._query_words``-style raw SQL.
+    - **SQLite (offline / CI / tests)**: returns ``[]`` — no
+      ``pgvector`` operator on SQLite, no ``phrases.embedding``
+      column populated by the offline backfill. The fallback
+      matches the idiom endpoint's offline discipline
+      (``_is_postgres_target`` guard).
 
     Parameters
     ----------
     db
-        Active SQLAlchemy session (not used in the 10.2 stub;
-        kept in the signature for 10.3's byte-stable drop-in).
+        Active SQLAlchemy session.
     pair
-        The selected ``PhrasePair`` row (anchor for the cosine
-        pull — not used in the 10.2 stub).
+        The selected ``PhrasePair`` row (anchor for the
+        cosine pull — its ``phrase_a_id`` / ``phrase_b_id``
+        slugs drive the join).
     top_k
         Nearest-neighbor count (default ``RAG_TOP_K = 3``).
 
     Returns
     -------
     list[dict]
-        10.2 stub: empty list. 10.3 will return
-        ``[{"kind": "phrase_pair", "id": int, "phrase_a": str,
-        "phrase_b": str, "relation": str}, ...]``.
+        Up to ``top_k`` dicts shaped as
+        ``{"kind": "phrase_pair", "id": int, "phrase_a_id": str,
+        "phrase_b_id": str, "phrase_a": str, "phrase_b": str,
+        "relation": str, "score": float}``. Empty list on the
+        SQLite fallback path so the prompt still assembles
+        cleanly under DummyLM.
     """
-    # 10.2 stub returns [] unconditionally — Hard rule #7 keeps
-    # the offline test path network-free; 10.3 replaces the body
-    # with the real sentence-transformers pull + phrase_pairs
-    # cosine query.
-    return []
+    # Mirror ``app.retrieval._is_postgres_target`` — single
+    # dialect check guards the whole pgvector SQL block.
+    from app.database import engine
+
+    if engine.dialect.name != "postgresql":
+        # SQLite (offline / CI) — return empty so the offline
+        # test path stays byte-stable. The route layer still
+        # forwards ``enable_rag=True``; the prompt just gets
+        # an empty ``retrieved_neighbors`` list, identical to
+        # the curated-only branch except for the
+        # ``bge-m3-cosine`` token. The token is added on the
+        # round-trip out so the response source_attribution
+        # correctly attributes RAG-on callers even when no
+        # neighbor rows surface.
+        return []
+
+    # Embedding path: local ``app.embeddings.embed_one`` —
+    # OpenRouter ``/embeddings`` HTTP endpoint, NOT a chat
+    # call (Hard rule #7 — no chat for retrieval). The
+    # embedding lookup requires ``OPENROUTER_API_KEY``; if
+    # the key is missing we surface an empty neighbor list so
+    # the route still serves a 200 with the curated-only
+    # prompt (rather than 502-ing on a missing key).
+    try:
+        from app.embeddings import embed_one
+
+        anchor_text = (
+            f"{_phrase_text_for(db, pair.phrase_a_id)} "
+            f"{_phrase_text_for(db, pair.phrase_b_id)}"
+        ).strip()
+        if not anchor_text:
+            return []
+        query_vec = embed_one(anchor_text)
+    except Exception:  # noqa: BLE001 — fallback to [] keeps the route alive
+        return []
+
+    if not query_vec:
+        return []
+
+    # pgvector cosine query — distance <=> cast to ``score``
+    # (1 - distance). Threshold at ``RAG_COSINE_FLOOR`` so
+    # anything below the floor is dropped. Deterministic
+    # ``ORDER BY score DESC, pp.id ASC`` so callers with the
+    # same anchor always get the same neighbor ordering.
+    vec_lit = "[" + ",".join(f"{x:.8f}" for x in query_vec) + "]"
+    sql = text(
+        """
+        SELECT
+            pp.id              AS pair_id,
+            pp.phrase_a_id     AS phrase_a_id,
+            pp.phrase_b_id     AS phrase_b_id,
+            pp.relation        AS relation,
+            pa.phrase          AS phrase_a,
+            pb.phrase          AS phrase_b,
+            (
+                SELECT MIN(d)
+                FROM (
+                    SELECT (pa.embedding <=> CAST(:qvec AS vector)) AS d
+                    UNION ALL
+                    SELECT (pb.embedding <=> CAST(:qvec AS vector))
+                ) AS distances
+            ) AS distance
+        FROM phrase_pairs pp
+        JOIN phrases pa ON pa.id = pp.phrase_a_id
+        JOIN phrases pb ON pb.id = pp.phrase_b_id
+        WHERE pa.embedding IS NOT NULL
+          AND pb.embedding IS NOT NULL
+          AND pp.id <> :anchor_id
+        HAVING (1.0 - distance) >= :floor
+        ORDER BY (1.0 - distance) DESC, pp.id ASC
+        LIMIT :k
+        """
+    )
+    rows = db.execute(
+        sql,
+        {
+            "qvec": vec_lit,
+            "k": int(top_k),
+            "anchor_id": int(pair.id),
+            "floor": float(RAG_COSINE_FLOOR),
+        },
+    ).fetchall()
+
+    return [
+        {
+            "kind": "phrase_pair",
+            "id": int(r.pair_id),
+            "phrase_a_id": str(r.phrase_a_id),
+            "phrase_b_id": str(r.phrase_b_id),
+            "phrase_a": str(r.phrase_a),
+            "phrase_b": str(r.phrase_b),
+            "relation": str(r.relation),
+            "score": 1.0 - float(r.distance),
+        }
+        for r in rows
+    ]
+
+
+def _phrase_text_for(db: Session, slug: str) -> str:
+    """Resolve a ``phrases.id`` slug to its surface text.
+
+    Helper for the anchor-text construction inside
+    ``_retrieve_phrase_pair_neighbors``. Returns ``""`` on
+    miss so the cosine query still proceeds with the
+    surviving phrase (the floor will reject any result with
+    no embedding anyway).
+    """
+    row = (
+        db.query(Phrase)
+        .filter(Phrase.id == slug)
+        .one_or_none()
+    )
+    return str(row.phrase) if row is not None and row.phrase else ""
 
 
 # ---------------------------------------------------------------------------
@@ -905,29 +1046,42 @@ def generate_phrase_match(
             word_id=0, candidates=int(phrase_a_row is None) + int(phrase_b_row is None)
         )
 
-    # 2. RAG-on stub (Hard rule #7 — no OpenRouter chat).
-    # 10.2: retrieval empty; 10.3 wires the real nearest-
-    # neighbor pull.
-    retrieved_neighbors_json: str | None = None
-    if enable_rag:
-        # 10.2 stub calls the empty default; 10.3 replaces
-        # with a real cosine pull against ``phrase_pairs``.
-        neighbors: list[dict[str, Any]] = []
-        retrieved_neighbors_json = json.dumps(
-            neighbors, ensure_ascii=False
-        )
-
-    # 3. Synthesize a transient ``PhrasePair`` view for the
-    # prompt (this path is called from the 10.3 endpoint which
-    # passes the resolved pair; for direct generator calls we
-    # build a transient mirror so ``build_prompt`` keeps the
-    # same input shape regardless of caller).
+    # 2. Synthesize a transient ``PhrasePair`` view for the
+    # retrieval helper + prompt (this path is called from the
+    # 10.3 endpoint which passes the resolved pair; for
+    # direct-generator calls we build a transient mirror so
+    # ``build_prompt`` keeps the same input shape regardless
+    # of caller).
+    #
+    # Phase 10.3 (card t_13bb48d2) — build the pair view BEFORE
+    # the retrieval call so the helper can use its
+    # ``phrase_a_id`` / ``phrase_b_id`` for the cosine anchor.
     pair_view = _make_transient_pair(
         phrase_a_id=str(phrase_a_row.id),
         phrase_b_id=str(phrase_b_row.id),
         relation="related",  # default; LLM picks the actual literal.
         attested_pair=True,
     )
+
+    # 3. RAG-on retrieval (Hard rule #7 — no OpenRouter chat).
+    # 10.2 stub returned ``[]`` unconditionally; 10.3 calls
+    # the real cosine helper on Postgres and the SQLite
+    # fallback otherwise. The dialect check lives INSIDE the
+    # helper so the call site stays one branch. When
+    # ``enable_rag=True`` AND neighbors surface, the
+    # ``bge-m3-cosine`` token gets appended to the
+    # ``source_attribution`` below so the response correctly
+    # attributes the RAG-on cohort.
+    retrieved_neighbors_json: str | None = None
+    if enable_rag:
+        neighbors: list[dict[str, Any]] = _retrieve_phrase_pair_neighbors(
+            db,
+            pair_view,
+            top_k=RAG_TOP_K,
+        )
+        retrieved_neighbors_json = json.dumps(
+            neighbors, ensure_ascii=False
+        )
 
     messages = build_prompt(
         pair_view,
