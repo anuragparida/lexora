@@ -28,20 +28,16 @@ ships three distinct surfaces that share one Pydantic contract
    idiom) and ``select_collocation_row`` (Phase 7.2 collocation).
    Same ``word_id`` → same pair across calls. No state, no random.
 
-**Phrase + PhrasePair — 10.2 read-only mirrors.** Phase 8.1
+**Phrase + PhrasePair — canonical on main.** Phase 8.1
 (``t_d967c006``) owns the authoritative ``Phrase`` SQLAlchemy model
 in ``app.models``; Phase 10.1 (``t_18c90a68``) owns the
-authoritative ``PhrasePair`` model. Until 10.1 folds into ``main``,
-this module declares a **local read-only mirror** of the expected
-10.1 schema (``__tablename__ = "phrase_pairs"`` is the join key,
-not Python identity) so the module compiles, the type system has
-something concrete to introspect, and the tests run with the same
-fixture shape 10.3 will exercise. The 8.1 mirror was already
-folded on 8.3; the 10.2 phrase_match module mirrors that
-``Phrase = models.Phrase`` re-export pattern AND uses a
-``try/except`` fallback for ``PhrasePair`` — when 10.1 lands on
-main, the canonical ``models.PhrasePair`` becomes the single
-source of truth.
+authoritative ``PhrasePair`` model. Both were folded to ``main``
+in Phase 10.11 (card ``t_f884b9cd``). This module re-exports both
+via ``Phrase = models.Phrase`` and ``PhrasePair = models.PhrasePair``
+so the rest of the file uses canonical names without an
+``app.models.`` prefix. The pre-fold local read-only mirror that
+10.2 shipped before 10.1 landed on ``main`` is gone (mirrors the
+Phase 8.3 ``Phrase`` fold-reconcile that did the same).
 
 **``word_id`` contract.** In the cloze / collocation worlds,
 ``word_id`` is a FK to ``words.id``. For phrase-match (Phase 10),
@@ -106,11 +102,14 @@ import random
 from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import models
-from app.database import Base
+from app.schemas import (  # noqa: E402  (models after app; intentional)
+    PhraseMatchGenerateRequest,
+    PhraseMatchExerciseOut,
+)
 from app.llm import _DSPyOpenAICompatLM  # the shared adapter (app.llm docstring)
 from app.observability import get_langfuse
 
@@ -167,20 +166,14 @@ RAG_TOP_K: int = 3
 # Read-only ORM imports.
 #
 # Phase 8.1 (card t_d967c006) owns the authoritative SQLAlchemy
-# ``Phrase`` model in ``app.models`` (folded on 8.3 — the
-# ``models.Phrase`` re-export below is the canonical reference).
-#
-# Phase 10.1 (card t_18c90a68) owns the authoritative SQLAlchemy
-# ``PhrasePair`` model. Until that fold lands on main, this module
-# declares a **local read-only mirror** of the expected 10.1 schema
-# (column-for-column: ``id``, ``phrase_a_id``, ``phrase_b_id``,
-# ``relation``, ``attested_pair``, ``created_at``) — the local
-# mirror compiles + passes tests in this worktree without depending
-# on 10.1's Alembic migration. The ``try/except`` guard below flips
-# to the canonical ``models.PhrasePair`` once 10.1 lands on main;
-# the local mirror is then dead-code and a follow-up cleanup removes
-# it (mirrors the 8.3 fold-reconcile pattern documented in
-# ``app.idiom``).
+# ``Phrase`` model in ``app.models``. Phase 10.1 (card t_18c90a68)
+# owns the authoritative ``PhrasePair`` model — both now live in
+# ``app.models`` on canonical main (folded in Phase 10.11, card
+# ``t_f884b9cd``). This module re-exports both as if they were
+# locally defined so the rest of the file uses canonical names
+# without an ``app.models.`` prefix at every call site. Mirrors the
+# Phase 7.2 / Phase 8.3 fold-on-main pattern, and the Phase 9
+# idiom.py fold-reconcile that did the same for ``app.idiom``.
 #
 # Read-only invariants (Hard rule #2):
 #
@@ -196,63 +189,14 @@ RAG_TOP_K: int = 3
 # Phase 8.3 fold-on-main pattern.
 Phrase = models.Phrase
 
-
-# Try-canonical-else-local-mirror for ``PhrasePair``. The fold to
-# ``models.PhrasePair`` happens when 10.1 lands on main; until
-# then, the local mirror below keeps the module compiling + the
-# tests green in this worktree. The mirror is byte-for-byte
-# compatible with the 10.1 schema per the card body spec.
-try:
-    PhrasePair = models.PhrasePair  # type: ignore[attr-defined]
-except AttributeError:
-    class PhrasePair(Base):  # type: ignore[no-redef]
-        """Local read-only mirror of the 10.1 ``phrase_pairs`` table.
-
-        Phase 10.1 (card t_18c90a68) owns the authoritative
-        SQLAlchemy ``PhrasePair`` model in ``app.models``. Until
-        10.1 lands on main, this module compiles + tests run with
-        this local mirror. The ``__tablename__ = "phrase_pairs"``
-        join key is what tests seed against — Python identity is
-        irrelevant to ``Base.metadata.create_all`` because both
-        this module and the future canonical model register the
-        same SQLAlchemy ``Table`` by name.
-
-        Schema (10.1 card body):
-
-        - ``id``: int PK, autoincrement.
-        - ``phrase_a_id``: str FK to ``phrases.id`` (Phrase.slug).
-        - ``phrase_b_id``: str FK to ``phrases.id`` (Phrase.slug).
-        - ``relation``: 4-way closed literal from
-          ``RELATION_CHOICES`` (= ``phrase_pairs.relation`` column
-          — same literals).
-        - ``attested_pair``: bool (True when the pair was hand-
-          curated, False when surfaced from the RAG-on nearest-
-          neighbor path).
-        - ``created_at``: DateTime (default ``func.now()``).
-        """
-        __tablename__ = "phrase_pairs"
-        __abstract__ = False
-
-        id = Column(Integer, primary_key=True, autoincrement=True)
-        phrase_a_id = Column(
-            String, ForeignKey("phrases.id"), nullable=False, index=True
-        )
-        phrase_b_id = Column(
-            String, ForeignKey("phrases.id"), nullable=False, index=True
-        )
-        relation = Column(String, nullable=False)
-        attested_pair = Column(Integer, nullable=False, default=1)
-        created_at = Column(
-            DateTime(timezone=True), server_default=func.now(), nullable=False
-        )
-
-        def __repr__(self) -> str:  # pragma: no cover — cosmetic only
-            return (
-                f"<PhrasePair id={self.id} "
-                f"phrase_a_id={self.phrase_a_id!r} "
-                f"phrase_b_id={self.phrase_b_id!r} "
-                f"relation={self.relation!r}>"
-            )
+# Canonical PhrasePair model — re-export (Phase 10.1 model on main
+# since ``t_f884b9cd`` fold). The local read-only mirror this module
+# shipped before 10.1 landed on main is removed: the canonical
+# ``models.PhrasePair`` is now the single source of truth. Tests that
+# used to seed against the local mirror's ``__tablename__`` still
+# resolve to the canonical table by name (SQLAlchemy registers both
+# against the same ``Table``).
+PhrasePair = models.PhrasePair
 
 
 # ---------------------------------------------------------------------------
