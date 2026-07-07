@@ -162,12 +162,20 @@ def upgrade() -> None:
             # The Python-side default mirrors ``Base``'s
             # ``default=False``; ``server_default`` is set so
             # raw-SQL inserts (``psql -c "INSERT ... "``) get
-            # ``False`` without a Python-side default.
+            # ``False`` without a Python-side default. Postgres
+            # requires the boolean literal form (``false``); the
+            # bare integer ``0`` is rejected with
+            # ``column ... is of type boolean but default
+            # expression is of type integer``. SQLite accepts
+            # either shape, which is why the SQLite-only test
+            # suite didn't catch this — fold smoke test on the
+            # live Postgres instance surfaced it (Phase 10.11,
+            # card ``t_f884b9cd``).
             sa.Column(
                 "attested_pair",
                 sa.Boolean,
                 nullable=False,
-                server_default=sa.text("0"),
+                server_default=sa.text("false"),
             ),
             sa.Column(
                 "created_at",
