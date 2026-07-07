@@ -360,13 +360,13 @@ class MeOut(BaseModel):
     client that only reads ``id``/``email`` keeps working.
 
     Phase 9.2 (card t_e4988202) widens the payload with
-    ``due_by_type`` — a 4-key dict counting due ``fsrs_cards`` rows
+    ``due_by_type`` — a 5-key dict counting due ``fsrs_cards`` rows
     of each exercise type (``cloze``, ``matching``,
-    ``comprehension``, ``idiom``). The frontend's first-login gate
-    (Phase 9.6) reads the dict total to decide between cloze-only
-    routing and the new union study-session mixer; cloze-only
-    callers that only read ``id``/``email`` keep working because
-    the field is additive.
+    ``comprehension``, ``idiom``, ``phrase_match``). The frontend's
+    first-login gate (Phase 9.6, widened by 10.6 to 5 keys) reads
+    the dict total to decide between cloze-only routing and the
+    union study-session mixer; cloze-only callers that only read
+    ``id``/``email`` keep working because the field is additive.
 
     On the legacy fsrs_cards schema (pre-Phase 9.1 — no
     ``exercise_type`` column), the dict defaults to all-zeros
@@ -374,7 +374,7 @@ class MeOut(BaseModel):
     table (Phase 5's single-user dev assumption). The Pydantic
     Literal-typed wrapper keeps the wire shape stable across the
     schema transition; the route-layer is responsible for
-    splitting the count across the 4 keys.
+    splitting the count across the 5 keys.
     """
 
     id: int
@@ -386,25 +386,36 @@ class MeOut(BaseModel):
     weakness_profile: Optional[WeaknessProfileOut] = None
     diagnostic_state: DiagnosticState = "never"
     # Phase 9.2 — counts of due ``fsrs_cards`` rows per exercise
-    # type. Always-present 4-key dict so the frontend can branch on
+    # type. Always-present 5-key dict so the frontend can branch on
     # ``sum(due_by_type.values())`` without null-checking the dict.
     # Missing keys (i.e. a pre-Phase-9.1 legacy schema where the
     # ``exercise_type`` column doesn't exist) get folded into the
     # ``cloze`` key per the single-user dev assumption documented
     # in Phase 5.6's ``/exercises/due`` route header.
+    #
+    # Phase 10.6 (card t_da43cc23) widens the closure dict from
+    # 4 to 5 keys additively; ``phrase_match`` joins as the 5th
+    # FSRS-graded exercise type. The Pydantic shape stays
+    # ``Dict[str, int]`` (not a closed Literal-tuple), so the wire
+    # contract is non-breaking — only the implicit "always 4 keys"
+    # convention shifts to "always 5 keys." A pre-Phase-10.1 schema
+    # where no ``phrase_match`` row exists reports
+    # ``phrase_match: 0`` by the same missing-key default rule.
     due_by_type: Dict[str, int] = Field(
         default_factory=lambda: {
             "cloze": 0,
             "matching": 0,
             "comprehension": 0,
             "idiom": 0,
+            "phrase_match": 0,
         },
         description=(
             "Phase 9.2 (card t_e4988202) — count of fsrs_cards rows "
             "with due_date <= now() for each exercise type. Always "
-            "4 keys (``cloze``, ``matching``, ``comprehension``, "
-            "``idiom``); zero for absent types. Used by the Phase 9.6 "
-            "frontend mixer to decide the first-login gate."
+            "5 keys (``cloze``, ``matching``, ``comprehension``, "
+            "``idiom``, ``phrase_match``); zero for absent types. "
+            "Used by the Phase 9.6 / 10.6 frontend mixer to decide "
+            "the first-login gate."
         ),
     )
 

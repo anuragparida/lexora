@@ -505,11 +505,11 @@ def read_me(
 
 def _count_due_cards_by_type(db: Session, *, now: datetime) -> dict:
     """Count due ``fsrs_cards`` rows per exercise type.
-    
-    Phase 9.2 (card t_e4988202). Returns a 4-key dict
-    ``{cloze, matching, comprehension, idiom}`` with counts of rows
-    whose ``due_date <= now``.
-    
+
+    Phase 9.2 (card t_e4988202). Returns a 5-key dict
+    ``{cloze, matching, comprehension, idiom, phrase_match}`` with
+    counts of rows whose ``due_date <= now``.
+
     Phase 9.1 (card t_0bfdb7ed) adds the ``exercise_type`` column;
     before that migration lands, every ``fsrs_cards`` row is
     implicitly cloze (Phase 5.6's contract). The function detects
@@ -517,7 +517,17 @@ def _count_due_cards_by_type(db: Session, *, now: datetime) -> dict:
     all-cloze legacy shape on the missing-column branch — the
     closure dict shape is identical either way, so callers don't
     need to special-case.
-    
+
+    Phase 10.6 (card t_da43cc23) widens the dict from 4 to 5 keys
+    additively. ``phrase_match`` joins the closed union as the
+    5th FSRS-graded exercise type (Phase 10.1 schema, 10.2
+    Literal widening, 10.3 endpoint, 10.5 frontend page).
+    The SQL ``GROUP BY exercise_type`` already aggregates any
+    type the column carries — we only widen the closure dict
+    + the missing-key default so a phase_match row from the
+    DB is surfaced, and a pre-Phase-10.1 schema (where no
+    phase_match row exists) reports ``phrase_match: 0``.
+
     Single-user dev assumption (Phase 5): ``fsrs_cards`` has no
     ``user_id`` column, so the query is global. This matches
     ``GET /exercises/due``'s documented assumption. Per-user
@@ -530,6 +540,7 @@ def _count_due_cards_by_type(db: Session, *, now: datetime) -> dict:
         "matching": 0,
         "comprehension": 0,
         "idiom": 0,
+        "phrase_match": 0,
     }
     bind = db.get_bind()
     inspector = _sa_inspect(bind)
@@ -1880,9 +1891,9 @@ def generate_phrase_match_exercise(
 def get_due_exercise(
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
-    type: Literal["cloze", "matching", "comprehension", "idiom", "any"] = (
-        Query("any")
-    ),
+    type: Literal[
+        "cloze", "matching", "comprehension", "idiom", "phrase_match", "any"
+    ] = Query("any"),
 ) -> Any:
     """Return the next exercise the authenticated user is due to review.
 

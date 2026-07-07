@@ -402,7 +402,14 @@ def _stub_cloze_for(monkeypatch, word_id: int) -> None:
 def test_auth_me_due_by_type_all_four_buckets_present(
     client, db_session, fsrs_with_type_column
 ) -> None:
-    """Seeding one card per type populates every bucket in ``due_by_type``."""
+    """Seeding one card per type populates every bucket in ``due_by_type``.
+
+    Phase 10.6 (card t_da43cc23) widens the closure dict from 4
+    to 5 keys additively — ``phrase_match`` joins as the 5th
+    bucket with the same zero-default behavior as the 4 prior
+    types when no card is seeded for it. The test exercises the
+    "all 4 prior buckets + 1 zero-default phrase_match" shape.
+    """
     _signup(client)
     _seed_four_type_due_queue(db_session)
 
@@ -412,13 +419,14 @@ def test_auth_me_due_by_type_all_four_buckets_present(
     counts = body["due_by_type"]
 
     assert set(counts.keys()) == {
-        "cloze", "matching", "comprehension", "idiom",
+        "cloze", "matching", "comprehension", "idiom", "phrase_match",
     }, counts
     assert counts == {
         "cloze": 1,
         "matching": 1,
         "comprehension": 1,
         "idiom": 1,
+        "phrase_match": 0,
     }, counts
 
 
@@ -539,6 +547,7 @@ def test_full_4_type_session_mix_grades_three_leaves_idiom_pending(
         "matching": 1,
         "comprehension": 1,
         "idiom": 1,
+        "phrase_match": 0,
     }
 
     # --- Step 4: pick + grade cloze -----------------------------
@@ -661,6 +670,7 @@ def test_full_4_type_session_mix_grades_three_leaves_idiom_pending(
         "matching": 0,
         "comprehension": 0,
         "idiom": 1,
+        "phrase_match": 0,
     }
 
 
@@ -838,3 +848,120 @@ def test_no_filter_returns_truly_empty_after_all_gradeable_cards_off(
     assert "X-Due-Exercise-Type" not in final.headers
     assert "X-Due-Card-Id" not in final.headers
     assert "X-Due-Word-Id" not in final.headers
+
+
+# ===========================================================================
+# Phase 10.6 (card t_da43cc23) -- ``phrase_match`` widens the
+# ``/exercises/due`` union + ``/auth/me.due_by_type`` closure dict
+# to the 5th literal (additive Literal widening).
+#
+# The Phase 10.1 schema (card t_18c90a68) added the ``phrase_pairs``
+# table + the ``fsrs_cards.exercise_type='phrase_match'`` value.
+# Phase 10.2 (card t_5d91a7e7) added the DSPy module + 5-way
+# ``BaseExerciseFields`` Literal widening. Phase 10.3 (card t_13bb48d2)
+# added the ``POST /exercises/phrase_match`` endpoint. Phase 10.5
+# (card t_ca1d2da8) added the frontend per-type page. Phase 10.6
+# wires the 5th type into the union + first-login gate so a user
+# with only ``phrase_match`` due cards lands on ``/exercises/session``
+# (not the cloze-only fallback).
+# ===========================================================================
+
+
+def test_phrase_match_due_queue_surfaces_via_204_with_headers(
+    client, db_session, fsrs_with_type_column
+) -> None:
+    """``GET /exercises/due?type=phrase_match`` picks a phrase_match
+    card and surfaces it via the union 204+headers shape.
+
+    Mirrors the matching / comprehension / idiom branches on the
+    same union surface. The ``X-Due-Exercise-Type`` header carries
+    the discriminator; the route's ``match`` on ``picked_card_type
+    != 'cloze'`` is type-agnostic so phrase_match rides the same
+    read-side widening without a per-type branch.
+    """
+    from app import models  # noqa: F401 -- register tables
+
+    _signup(client)
+    word = _seed_word(db_session, word="phrase_match_word", word_type="Noun")
+    _seed_due_card(
+        db_session,
+        word_id=word,
+        exercise_type="phrase_match",
+        due_date=datetime.utcnow() - timedelta(minutes=5),
+    )
+
+    resp = client.get("/exercises/due?type=phrase_match")
+    assert resp.status_code == 204, resp.text
+    assert resp.headers["X-Due-Exercise-Type"] == "phrase_match"
+    assert resp.headers["X-Due-Word-Id"] == str(word)
+
+
+def test_phrase_match_due_by_type_bucket_populated(
+    client, db_session, fsrs_with_type_column
+) -> None:
+    """``/auth/me.due_by_type['phrase_match']`` reports the seeded
+    phrase_match card count.
+
+    Seeds one phrase_match card; ``/auth/me`` returns the
+    Phase-10.6 5-key ``due_by_type`` dict with ``phrase_match=1``
+    and the other 4 buckets at 0. This is the gate-widening
+    hard-rule test: a learner with only a phrase_match card due
+    must land on ``/exercises/session`` (the mixer's
+    ``sum(due_by_type) > 0`` branch reads the new bucket).
+    """
+    _signup(client)
+    word = _seed_word(db_session, word="phrase_match_word", word_type="Noun")
+    _seed_due_card(
+        db_session,
+        word_id=word,
+        exercise_type="phrase_match",
+        due_date=datetime.utcnow() - timedelta(minutes=5),
+    )
+
+    resp = client.get("/auth/me")
+    assert resp.status_code == 200, resp.text
+    counts = resp.json()["due_by_type"]
+    assert counts == {
+        "cloze": 0,
+        "matching": 0,
+        "comprehension": 0,
+        "idiom": 0,
+        "phrase_match": 1,
+    }, counts
+
+
+def test_phrase_match_only_due_card_routes_to_session_mixer(
+    client, db_session, fsrs_with_type_column
+) -> None:
+    """Phase 10.6 gate-widening hard rule: a user with only a
+    phrase_match card due must land on ``/exercises/session`` (not
+    the cloze-only ``/exercises/due`` fallback, not the profile
+    branches).
+
+    The frontend's ``postAuthGate`` reads
+    ``sum(due_by_type.values())``; without the 5-key widening the
+    ``phrase_match`` bucket would be missing and the gate would
+    silently route the user to ``/weakness-profile`` (a hard-rule
+    violation per the card body §"First-login gate widens to 5
+    types"). This test pins the wire contract: backend surfaces
+    ``phrase_match`` in the dict; downstream gating reads it.
+    """
+    _signup(client)
+    word = _seed_word(db_session, word="phrase_match_word", word_type="Noun")
+    _seed_due_card(
+        db_session,
+        word_id=word,
+        exercise_type="phrase_match",
+        due_date=datetime.utcnow() - timedelta(minutes=5),
+    )
+
+    me = client.get("/auth/me")
+    assert me.status_code == 200, me.text
+    counts = me.json()["due_by_type"]
+    # Hard rule: gate's `sum > 0` branch must fire. Sum is
+    # `phrase_match=1`; all other buckets at 0. Without the
+    # 10.6 widening the sum would be 0 and the gate would
+    # route to /weakness-profile (failure mode).
+    total = sum(counts.values())
+    assert total == 1, counts
+    assert counts["phrase_match"] == 1, counts
