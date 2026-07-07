@@ -323,6 +323,15 @@ export function ExerciseCard({
     if (exercise.exercise_type === 'idiom') {
       return exercise.exercise_id
     }
+    if (exercise.exercise_type === 'phrase_match') {
+      // Phase 10.5 — phrase_match carries a server-minted
+      // ``exercise_id`` on the wire (same convention as the
+      // three prior non-cloze types), so we read it
+      // directly. No cloze-style ``answer_word_id`` fallback
+      // because the page never falls back to it (the route
+      // mints the id itself in 10.3).
+      return exercise.exercise_id
+    }
     // cloze: prefer server-minted (Phase 5.x), else answer_word_id
     return exercise.exercise_id ?? exercise.answer_word_id
   }, [exercise])
@@ -380,6 +389,25 @@ export function ExerciseCard({
           owns the empty-profile / empty-due state machine. ExerciseCard
           accepts the cloze wire for completeness but does not render
           it directly.
+        </div>
+      )
+      break
+    case 'phrase_match':
+      // Phase 10.5 — phrase_match carries its own bespoke
+      // body (the 4-button relation picker + the two-phrase
+      // layout). The shared ExerciseCard accepts the wire for
+      // exhaustiveness, but the page (``PhraseMatchPage``)
+      // owns the rendering; this branch surfaces a routing
+      // hint if someone mounts the card directly with a
+      // phrase_match payload (current call sites go through
+      // ``PhraseMatchPage`` instead).
+      bodyNode = (
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-300">
+          Phrase match exercises use the dedicated{' '}
+          <code className="font-mono">PhraseMatchPage</code> surface,
+          which owns the 4-button relation picker + the two-phrase
+          layout. ExerciseCard accepts the phrase_match wire for
+          exhaustiveness but does not render it directly.
         </div>
       )
       break
