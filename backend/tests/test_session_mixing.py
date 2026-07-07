@@ -685,17 +685,25 @@ def test_full_4_type_session_mix_grades_three_leaves_idiom_pending(
 # ===========================================================================
 
 
-def test_idiom_grade_is_intentionally_422_until_phase_9_1_plus(
+def test_idiom_grade_now_200_after_phase_10_11_widening(
     client, db_session, fsrs_with_type_column
 ) -> None:
     """``exercise_type="idiom"`` on ``POST /exercises/grade`` returns
-    a 422 (the idiom-grade branch is deferred to Phase 9.1+).
+    a 200 (the idiom-grade branch is wired in Phase 10.11,
+    card t_f884b9cd).
 
-    The mixer's 4-type flow surfaces idiom via the read side
-    (X-Due-* headers) but cannot currently grade it. Locking the
-    422 here keeps the contract visible -- if a future card enables
-    idiom grading, the test must be updated to assert 200 +
-    ``GradeResponse``, and the comment above is the citation.
+    Phase 10.11 closes the long-standing 422 that the Phase 8.3
+    idiom-ship commit (5b9e7aa) intentionally left in place pending
+    "Phase 9 adds the FSRS-graded-recall surface". Phase 9 closed
+    the read side (Phase 9.6 mixer widening) but never wired the
+    ``/grade`` arm. Phase 10.11 widens ``ExerciseType`` 4→5 and
+    adds a ``case "idiom"`` arm that routes through ``_grade_idiom``
+    (a thin wrapper around ``_grade_one``, mirroring
+    ``_grade_matching`` / ``_grade_comprehension`` / ``_grade_phrase_match``).
+
+    The mixer's 5-type flow surfaces idiom via the read side
+    (X-Due-* headers) AND now grades it via the write side —
+    same ``GradeResponse`` shape as the other four types.
     """
     _signup(client)
     cards = _seed_four_type_due_queue(db_session)
@@ -706,11 +714,12 @@ def test_idiom_grade_is_intentionally_422_until_phase_9_1_plus(
     assert idiom_pick.status_code == 204, idiom_pick.text
     assert idiom_pick.headers["X-Due-Word-Id"] == str(cards["idiom"])
 
-    # The actual contract under test: the grade request for idiom
-    # is a clean 422, not a 500. The 422 is the documented Phase 8
-    # schema-rejection path (the GradeRequest schema accepts the
-    # 4-way literal but the route's match statement has no idiom
-    # arm, so the defensive fallback raises HTTPException 422).
+    # Phase 10.11 wires the idiom-grade branch — the contract is
+    # a 200 with the same ``GradeResponse`` shape as cloze /
+    # matching / comprehension / phrase_match. ``_grade_idiom``
+    # is a thin wrapper around ``_grade_one``; the only per-type
+    # difference is the trace span name (``idiom.grade``) and
+    # the ``grade_logs.exercise_type`` label (``"idiom"``).
     resp = client.post(
         "/exercises/grade",
         json={
@@ -719,7 +728,11 @@ def test_idiom_grade_is_intentionally_422_until_phase_9_1_plus(
             "grade": 3,
         },
     )
-    assert resp.status_code == 422, resp.text
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["graded"] is True
+    assert payload["exercise_id"] == cards["idiom"]
+    assert payload["exercise_type"] == "idiom"
 
 
 # ===========================================================================
