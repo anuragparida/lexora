@@ -2244,14 +2244,16 @@ def _pick_due_fsrs_card(
 # Hard rules enforced here:
 #   1. py-fsrs only (no inline scheduling). All scheduling via
 #      ``apply_grade``.
-#   2. Closed 3-way exercise-type literal (cloze / matching /
-#      comprehension) — the route trusts the schema and does not
-#      re-validate.
+#   2. Closed exercise-type literal (cloze / matching /
+#      comprehension / idiom / phrase_match — Phase 10.11
+#      widened 4-way to 5-way additively) — the route trusts
+#      the schema and does not re-validate.
 #   4. Every grade is traced via ``_trace_grade``; ``trace_id``
 #      propagates to the ``grade_logs`` row. Span name is
 #      per-exercise-type (``exercise.grade`` for cloze,
 #      ``match.grade`` for matching, ``comprehension.grade`` for
-#      comprehension).
+#      comprehension, ``idiom.grade`` for idiom, ``phrase_match.grade``
+#      for phrase_match).
 #   5. Pydantic v2 validates input; the handler does no extra
 #      validation beyond what the schema enforces.
 # ---------------------------------------------------------------------------
@@ -2273,6 +2275,13 @@ def grade_exercise(
     ``grade_logs.exercise_type`` label — the FSRS scheduling path
     is shared. The cloze handler (``_grade_cloze``) is the same
     code that 5.3 shipped, lifted verbatim.
+
+    Phase 10.11 (card t_f884b9cd) widens the fan-out to 5 types:
+    ``_grade_idiom`` (Phase 8.3) and ``_grade_phrase_match``
+    (Phase 10.2) join the existing cloze / matching /
+    comprehension arms. All five route through ``_grade_one`` —
+    the per-type handler exists only to pin the trace span name
+    and the ``grade_logs.exercise_type`` label.
     """
     match payload.exercise_type:
         case "cloze":
@@ -2281,18 +2290,18 @@ def grade_exercise(
             return _grade_matching(db, current_user, payload)
         case "comprehension":
             return _grade_comprehension(db, current_user, payload)
+        case "idiom":
+            return _grade_idiom(db, current_user, payload)
+        case "phrase_match":
+            return _grade_phrase_match(db, current_user, payload)
         case _:  # pragma: no cover — schema gate rejects this
             # Defensive fallback. The ``GradeRequest`` schema's
-            # 4-way ``ExerciseType`` literal
-            # (Phase 8.3 widened it from 3 to 4 via card
-            # t_fa86ac58) should have rejected anything outside
-            # the union upstream; if we reach here, the schema
-            # gate has been bypassed and we want a clean 422
-            # rather than a 500. Note: ``"idiom"`` exercises
-            # route to ``_grade_one`` once Phase 9 adds the
-            # FSRS-graded-recall surface; until then a grade
-            # request with ``exercise_type="idiom"`` is
-            # intentionally a 422.
+            # 5-way ``ExerciseType`` literal (Phase 10.11 widened
+            # it from 4 to 5 additively via card t_f884b9cd)
+            # should have rejected anything outside the union
+            # upstream; if we reach here, the schema gate has
+            # been bypassed and we want a clean 422 rather than
+            # a 500.
             raise HTTPException(
                 status_code=422,
                 detail=f"unsupported exercise_type: {payload.exercise_type}",
@@ -2360,6 +2369,80 @@ def _grade_comprehension(
     )
 
 
+def _grade_idiom(
+    db: Session,
+    current_user: models.User,
+    payload: schemas.GradeRequest,
+) -> schemas.GradeResponse:
+    """Phase 10.11 (card t_f884b9cd) idiom-grade handler.
+
+    Sibling wrapper around ``_grade_one``. Trace span name:
+    ``idiom.grade``. ``grade_logs.exercise_type`` is
+    ``"idiom"``. The FSRS scheduling path is shared with the
+    cloze / matching / comprehension handlers — only the
+    span name and the audit-row label differ.
+
+    **Phase 8.3 antecedent.** Idiom exercises were
+    intentionally 422'd by the ``match`` statement's
+    ``case _`` branch from the Phase 8.3 idiom-ship commit
+    (5b9e7aa) — the comment noted that ``"idiom"`` exercises
+    would route to ``_grade_one`` "once Phase 9 adds the
+    FSRS-graded-recall surface". Phase 9 closed the
+    session-mixer side (Phase 9.6) but never wired the
+    ``/grade`` arm. Phase 10.11 closes that gap in-fold —
+    idiom's `exercise_id` is server-minted (signed 8-byte int)
+    just like matching / comprehension / phrase_match, so
+    ``_grade_one`` looks up ``fsrs_cards.word_id ==
+    exercise_id`` and creates the row inline (Phase 5.3 first-
+    encounter path) on first grade. The orphan-row pattern is
+    shared with matching / comprehension (Phase 6.6) — see
+    the comment thread on t_f884b9cd for the analysis.
+    """
+    return _grade_one(
+        db=db,
+        current_user=current_user,
+        payload=payload,
+        span_name="idiom.grade",
+    )
+
+
+def _grade_phrase_match(
+    db: Session,
+    current_user: models.User,
+    payload: schemas.GradeRequest,
+) -> schemas.GradeResponse:
+    """Phase 10.11 (card t_f884b9cd) phrase_match-grade handler.
+
+    Sibling wrapper around ``_grade_one``. Trace span name:
+    ``phrase_match.grade``. ``grade_logs.exercise_type`` is
+    ``"phrase_match"``. The FSRS scheduling path is shared
+    with the cloze / matching / comprehension / idiom
+    handlers — only the span name and the audit-row label
+    differ.
+
+    **Phase 10.7 anchor.** Phase 10.7
+    (``scripts/optimize_phrase_match.py``, card t_dab34a97)
+    shipped the optimizer + Ragas floor gate that promotes
+    the phrase_match DSPy module to production. Phase 10.7's
+    spec (per the optimizer docstring) treats phrase_match as
+    a 5th exercise type on the same wire contract as the four
+    prior types — the same ``/exercises/grade`` route, the
+    same ``GradeRequest`` body, the same FSRS grade scale
+    (1=Again, 2=Hard, 3=Good, 4=Easy). Phase 10.11 closes the
+    last-mile gap: ``_grade_phrase_match`` is the wrapper that
+    Phase 10.7's grader-fan-out plan described but didn't ship.
+    Like the idiom / matching / comprehension wrappers, the
+    phrase_match ``exercise_id`` is server-minted; ``_grade_one``
+    creates the ``fsrs_cards`` row inline on first grade.
+    """
+    return _grade_one(
+        db=db,
+        current_user=current_user,
+        payload=payload,
+        span_name="phrase_match.grade",
+    )
+
+
 def _grade_one(
     *,
     db: Session,
@@ -2370,12 +2453,14 @@ def _grade_one(
     """Apply a 1-4 FSRS grade to the user's card for the requested
     exercise.
 
-    This is the shared body that all three per-type handlers
-    (``_grade_cloze`` / ``_grade_matching`` / ``_grade_comprehension``)
-    route through. The Phase 5.3 cloze-only body is preserved
-    byte-for-byte — the per-type handlers exist only to pin the
-    ``span_name`` and (via ``payload.exercise_type``) the
-    ``grade_logs.exercise_type`` label.
+    This is the shared body that all five per-type handlers
+    (``_grade_cloze`` / ``_grade_matching`` /
+    ``_grade_comprehension`` / ``_grade_idiom`` /
+    ``_grade_phrase_match``) route through. The Phase 5.3
+    cloze-only body is preserved byte-for-byte — the per-type
+    handlers exist only to pin the ``span_name`` and (via
+    ``payload.exercise_type``) the ``grade_logs.exercise_type``
+    label.
 
     See the section header above for the full wire contract.
     """

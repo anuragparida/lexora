@@ -860,12 +860,22 @@ class ClozeGenerateResponse(BaseModel):
 # (or negative) id is rejected before it reaches the grader.
 # ---------------------------------------------------------------------------
 
-# The single source of truth for the closed 3-way exercise-type
+# The single source of truth for the closed exercise-type
 # union. The route layer in ``app.main`` dispatches on this same
 # value via a ``match`` statement (Python 3.10+). If a future card
 # widens the union (Phase 7+), the only edits are here + the
 # ``match`` arms in ``app.main`` + the matching handler functions.
-ExerciseType = Literal["cloze", "matching", "comprehension", "idiom"]
+#
+# Phase 10 (card t_f884b9cd) widened 4-way to 5-way additively —
+# ``"phrase_match"`` joins the union (Phase 10.2 / 10.3 +
+# Phase 10.11's fold-reconcile step). The literal is monotonically
+# widening; prior callers parse as before. The matching / comprehension
+# arms (Phase 6.6) predate the FSRS-anchored ``word_id`` pattern, so
+# the 10.11 wrappers for idiom / phrase_match mirror the 6.6 shape —
+# thin handlers around ``_grade_one`` that pin the trace span name and
+# the ``grade_logs.exercise_type`` label. The FSRS scheduling path is
+# exercise-type-agnostic (all five types route through ``_grade_one``).
+ExerciseType = Literal["cloze", "matching", "comprehension", "idiom", "phrase_match"]
 
 
 # Phase 8.3 (card t_fa86ac58) — re-export the canonical idiom-source

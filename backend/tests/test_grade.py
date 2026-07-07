@@ -1053,3 +1053,215 @@ def test_grade_route_dispatches_via_match_statement() -> None:
     assert 'span_name="comprehension.grade"' in main_src, (
         "comprehension span name not pinned to 'comprehension.grade'"
     )
+
+
+# ===========================================================================
+# 17. Phase 10.11 — exercise_type="idiom" widens the /grade Literal
+# ===========================================================================
+
+
+def test_idiom_grade_returns_200_with_idiom_response(
+    client, db_session
+) -> None:
+    """Phase 10.11 (card t_f884b9cd) — ``exercise_type="idiom"``
+    is the 4th value in the now-5-way Literal. The route's
+    ``_grade_idiom`` handler runs the same ``apply_grade`` +
+    ``grade_logs`` write path as the cloze / matching /
+    comprehension branches, with trace span name ``idiom.grade``
+    and a ``grade_logs.exercise_type`` label of ``"idiom"``.
+
+    Phase 8.3 idiom-ship (commit 5b9e7aa) intentionally 422'd
+    idiom grade requests pending Phase 9's "FSRS-graded-recall
+    surface" — Phase 9 closed the session-mixer side (9.6) but
+    never wired the ``/grade`` arm. Phase 10.11 closes that
+    gap in-fold.
+    """
+    _signup(client)
+    word_id = _seed_word(db_session, word="Schmetterling", word_type="Noun")
+
+    resp = client.post(
+        "/exercises/grade",
+        json={
+            "exercise_id": word_id,
+            "exercise_type": "idiom",
+            "grade": 3,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["graded"] is True
+    assert payload["exercise_id"] == word_id
+    assert payload["exercise_type"] == "idiom"
+    assert payload["trace_id"] is None
+    assert payload["card_state"] in (1, 2, 3)
+    assert payload["stability"] >= 0
+    assert payload["difficulty"] >= 0
+    assert isinstance(payload["next_due_at"], str)
+
+
+# ===========================================================================
+# 18. Phase 10.11 — exercise_type="phrase_match" widens the /grade Literal
+# ===========================================================================
+
+
+def test_phrase_match_grade_returns_200_with_phrase_match_response(
+    client, db_session
+) -> None:
+    """Phase 10.11 (card t_f884b9cd) — ``exercise_type="phrase_match"``
+    is the 5th value in the now-5-way Literal. The route's
+    ``_grade_phrase_match`` handler runs the same ``apply_grade``
+    + ``grade_logs`` write path as the cloze / matching /
+    comprehension / idiom branches, with trace span name
+    ``phrase_match.grade`` and a ``grade_logs.exercise_type``
+    label of ``"phrase_match"``.
+
+    This is the literal widening the Phase 10 plan body hard-rule
+    #1 ("Additive Literal widening (4-way to 5-way); NEVER narrow")
+    required: ``phrase_match`` is the 5th exercise type on the
+    same wire contract as the four prior types. Phase 10.7's
+    optimizer (card t_dab34a97) spec'd a "grader-fan-out" plan
+    that 10.11 closes here.
+    """
+    _signup(client)
+    word_id = _seed_word(db_session, word="Fahrrad", word_type="Noun")
+
+    resp = client.post(
+        "/exercises/grade",
+        json={
+            "exercise_id": word_id,
+            "exercise_type": "phrase_match",
+            "grade": 3,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["graded"] is True
+    assert payload["exercise_id"] == word_id
+    assert payload["exercise_type"] == "phrase_match"
+    assert payload["trace_id"] is None
+    assert payload["card_state"] in (1, 2, 3)
+    assert payload["stability"] >= 0
+    assert payload["difficulty"] >= 0
+    assert isinstance(payload["next_due_at"], str)
+
+
+def test_phrase_match_grade_log_row_records_exercise_type(
+    client, db_session
+) -> None:
+    """The ``grade_logs`` row written by ``_grade_phrase_match``
+    carries ``exercise_type="phrase_match"`` — same audit-row
+    shape as the cloze / matching / comprehension / idiom paths,
+    only the label differs. Mirrors
+    ``test_comprehension_grade_log_row_records_exercise_type``
+    on the new 5th arm.
+    """
+    from app import models
+
+    _signup(client)
+    word_id = _seed_word(db_session, word="Haus", word_type="Noun")
+
+    resp = client.post(
+        "/exercises/grade",
+        json={
+            "exercise_id": word_id,
+            "exercise_type": "phrase_match",
+            "grade": 4,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    log = (
+        db_session.query(models.GradeLog)
+        .filter(models.GradeLog.user_id == _user_id_from_cookie(client))
+        .order_by(models.GradeLog.id.desc())
+        .first()
+    )
+    assert log is not None, "grade_logs row missing for phrase_match grade"
+    assert log.exercise_type == "phrase_match"
+    assert log.grade == 4
+    assert log.exercise_id == word_id
+
+
+# ===========================================================================
+# 19. Phase 10.11 — full 5-way /grade fan-out: hermetic source-grep
+# ===========================================================================
+
+
+def test_grade_route_dispatches_via_match_statement_5way() -> None:
+    """Phase 10.11 widens the Phase 6.6 fan-out guard to 5
+    per-type handlers. Hermetic source-grep — no DB / client.
+
+    Pins:
+    - ``_grade_idiom`` / ``_grade_phrase_match`` are siblings of
+      the existing cloze / matching / comprehension handlers.
+    - The ``match payload.exercise_type:`` statement carries
+      the two new ``case "idiom"`` / ``case "phrase_match"`` arms.
+    - The new span names ``idiom.grade`` and
+      ``phrase_match.grade`` are pinned on the wrappers.
+    """
+    import os
+
+    main_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "app", "main.py")
+    )
+    with open(main_path, encoding="utf-8") as f:
+        main_src = f.read()
+
+    # Per-type handlers must exist as siblings of _grade_one.
+    assert "def _grade_cloze" in main_src
+    assert "def _grade_matching" in main_src
+    assert "def _grade_comprehension" in main_src
+    assert "def _grade_idiom" in main_src, (
+        "_grade_idiom handler missing from main.py — Phase 10.11"
+    )
+    assert "def _grade_phrase_match" in main_src, (
+        "_grade_phrase_match handler missing from main.py — Phase 10.11"
+    )
+    assert "def _grade_one" in main_src
+
+    # The route dispatches via match statement on payload.exercise_type.
+    assert "match payload.exercise_type:\n" in main_src
+
+    # The 5 case arms must all be present in the dispatch.
+    assert 'case "cloze":' in main_src
+    assert 'case "matching":' in main_src
+    assert 'case "comprehension":' in main_src
+    assert 'case "idiom":' in main_src, (
+        '"idiom" case arm missing from /exercises/grade dispatch'
+    )
+    assert 'case "phrase_match":' in main_src, (
+        '"phrase_match" case arm missing from /exercises/grade dispatch'
+    )
+
+    # Each per-type handler threads the right span name into _grade_one.
+    assert 'span_name="exercise.grade"' in main_src
+    assert 'span_name="match.grade"' in main_src
+    assert 'span_name="comprehension.grade"' in main_src
+    assert 'span_name="idiom.grade"' in main_src
+    assert 'span_name="phrase_match.grade"' in main_src
+
+    # The schema's ExerciseType literal widened 4-way to 5-way.
+    from app import schemas
+
+    exercise_type_args = schemas.ExerciseType.__args__
+    assert "phrase_match" in exercise_type_args, (
+        "ExerciseType Literal missing 'phrase_match' — Phase 10.11"
+    )
+    assert len(exercise_type_args) == 5, (
+        f"ExerciseType Literal should have 5 entries, "
+        f"got {len(exercise_type_args)}: {exercise_type_args}"
+    )
+
+
+def _user_id_from_cookie(client) -> int:
+    """Read the current user id by parsing the lexora_token cookie.
+
+    Mirrors the discipline of ``_signup``-using tests — the cookie
+    is the canonical auth surface for the SPA, so any grade-log
+    audit assertion that needs ``user_id`` reads it back via
+    ``GET /auth/me`` rather than re-signing up (which would 409
+    on a duplicate email).
+    """
+    resp = client.get("/auth/me")
+    assert resp.status_code == 200, resp.text
+    return int(resp.json()["id"])
