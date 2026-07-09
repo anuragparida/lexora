@@ -252,15 +252,28 @@ def test_bundled_attested_pairs_json_exists():
 
 def test_bundled_attested_pairs_json_is_valid_manifest():
     """The bundled JSON parses cleanly via
-    ``PhrasePairSeedManifest`` — an empty ``pairs`` list is
-    the starting state. A typo'd slug or invalid relation in
-    a future 10.4 row would cause this test to fail."""
+    ``PhrasePairSeedManifest``. A typo'd slug or invalid relation
+    in any row would cause this test to fail (the manifest
+    validator enforces both).
+
+    Phase 10.4 (card ``t_f3d2a634``) shipped the populated
+    Goethe/Schiller attested-pair list (12 curated rows sourced
+    from the Phase 8.2 attestation corpus); the file is no
+    longer the pre-10.4 ``{"pairs": []}`` placeholder. The
+    comprehensive field + relation coverage is exercised by
+    ``tests/test_phrase_match_eval.py``; this test only pins
+    that the bundled JSON is a valid manifest.
+    """
     with open(SEED_JSON, encoding="utf-8") as f:
         payload = json.load(f)
     manifest = PhrasePairSeedManifest.model_validate(payload)
     assert isinstance(manifest.pairs, list)
-    # Phase 10.4 hasn't shipped yet — the file ships empty.
-    assert manifest.pairs == []
+    # Phase 10.4 deliverable: 12 curated Goethe/Schiller pairs
+    # (card t_f3d2a634, fold card t_51289780). The seed script
+    # asserts every row's slug exists in the planted phrases
+    # table; the field-by-field coverage lives in
+    # ``tests/test_phrase_match_eval.py``.
+    assert len(manifest.pairs) == 12
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +437,7 @@ def _seed_with_db(
     tmp_path: Path,
     *seed_args: str,
     bootstrap: bool = True,
+    attested_pairs_path: Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Run the seed script against ``db_path``.
 
@@ -434,19 +448,44 @@ def _seed_with_db(
     ``bootstrap=False`` so we don't trip the ``phrases.phrase``
     UNIQUE on a second INSERT of the same fixture phrases.
 
-    Returns the subprocess result (stdout/stderr/returncode)."""
+    ``attested_pairs_path`` overrides the bundled
+    ``backend/data/attested_pairs.json`` (default = bundled). The
+    seed-script determinism tests below pass a tmp empty-JSON
+    (``{"pairs": []}``) because the bundled 12 Goethe/Schiller
+    pairs (Phase 10.4 deliverable, card ``t_f3d2a634``) reference
+    slugs that aren't in the test fixture's 12 ``test-phrase-NN``
+    rows; loading the bundled file would error out with
+    ``attested slug '<slug>' not found in phrases table`` before
+    the test ever reaches its determinism assertions.
+
+    Returns the subprocess result (stdout/stderr/returncode).
+    """
     if bootstrap:
         _bootstrap_empty_db(db_path, tmp_path)
         _insert_test_phrases(db_path, n=12)
 
+    # Default: use a tmp empty attested-pairs file so the
+    # determinism tests aren't coupled to the bundled Phase 10.4
+    # Goethe/Schiller attested-pair list. Callers can override
+    # with ``attested_pairs_path`` to exercise the override path
+    # explicitly (see ``test_seed_script_respects_attested_pair_override``
+    # style tests, which pass a custom fixture).
+    if attested_pairs_path is None:
+        attested_pairs_path = tmp_path / "empty_attested_pairs.json"
+        attested_pairs_path.write_text(
+            json.dumps({"pairs": []}), encoding="utf-8"
+        )
+
     # Drive the script with the stub similarity function
     # (CI / test path; production uses bge-m3 cosine when
     # the cache is warm). The stub lives in a test fixture
-    # module imported via ``--similarity-fn``.
+    # module imported via ``--similarity-fn module:function``.
     return _run_seed(
         _alembic_env(db_path, tmp_path),
         "--similarity-fn",
         "tests.stub_seed_similarity:stub_similarity",
+        "--attested",
+        str(attested_pairs_path),
         *seed_args,
     )
 
