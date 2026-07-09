@@ -1,0 +1,7 @@
+# labeler: anurag-2026-hand-label-session
+# provenance: HUMAN-LABELED
+# exercise_type: phrase_match
+# spec: project_ideas/15_lexora_personalized_learner.md §Phase 10.4
+# relation_taxonomy: equivalent|paraphrase|related|unrelated
+# generated_by: backend/scripts/label_phrase_match_pairs.py
+# generated_at_seed: not-applicable-hand-labeled

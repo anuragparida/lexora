@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "exercise_type": "phrase_match",
+  "provenance": "HUMAN-LABELED",
+  "labeler": "Anurag Parida",
+  "labeler_session_window": null,
+  "labeler_helper": "backend/scripts/label_phrase_match_pairs.py",
+  "target_count": 50,
+  "current_count": 0,
+  "target_distribution": {
+    "equivalent": 12,
+    "paraphrase": 13,
+    "related": 12,
+    "unrelated": 13
+  },
+  "current_distribution": {
+    "equivalent": 0,
+    "paraphrase": 0,
+    "related": 0,
+    "unrelated": 0
+  },
+  "source_pool": "phrases table (Phase 8.1 + 8.2, ~367 rows)",
+  "attested_pairs_filename": "backend/data/attested_pairs.json",
+  "relation_taxonomy": [
+    "equivalent",
+    "paraphrase",
+    "related",
+    "unrelated"
+  ],
+  "relation_definitions": {
+    "equivalent": "Same meaning, interchangeable in any context.",
+    "paraphrase": "Same meaning, different register or formality, NOT interchangeable (e.g., 'ins Blaue hinein' vs. 'ohne klares Ziel').",
+    "related": "Shares semantic field or topic, but the meaning differs in a load-bearing way (e.g., 'Tomaten auf den Augen' vs. 'die Augen vor etwas verschließen').",
+    "unrelated": "No shared meaning; pairing is plausibly a 'false friend' or random pair from the planted tables."
+  },
+  "attested_pair_flag_meaning": "Boolean. 'true' for pairs that appear in backend/data/attested_pairs.json (Goethe/Schiller attested list from Phase 8.2); 'false' for the curated-phrases subset. The flag is binary and recorded per row.",
+  "row_schema": {
+    "phrase_a_id": "Slug FK into phrases.id. Lowercase-hyphenated, 3-120 chars.",
+    "phrase_b_id": "Slug FK into phrases.id. Same shape, must be distinct from phrase_a_id.",
+    "phrase_a": "Surface form of phrase A (5-200 chars).",
+    "phrase_b": "Surface form of phrase B (5-200 chars).",
+    "relation": "One of: equivalent, paraphrase, related, unrelated.",
+    "attested_pair": "Boolean. True only when (phrase_a_id, phrase_b_id) appears in backend/data/attested_pairs.json.",
+    "rationale": "Free-text one-sentence explanation of the relation choice (1-400 chars).",
+    "source_attribution_a": "One of the literal set {dwds, goethe, schiller, manual} (or comma-joined, e.g. 'dwds,goethe'). Pulled from the planted phrases row at labeling time.",
+    "source_attribution_b": "Same literal set; same source.",
+    "labeled_at": "ISO 8601 timestamp of the labeling event."
+  },
+  "hard_rules": [
+    "Both phrase_a_id and phrase_b_id MUST exist in the planted phrases table (the labeler helper validates this at insert time).",
+    "Same pair (phrase_a_id, phrase_b_id) MUST NOT appear twice; the helper is idempotent on the pair key.",
+    "JSONL file MUST carry the leading 'provenance: HUMAN-LABELED' header. The card body and the Phase 1.5a discipline require this tag.",
+    "No LLM call in the labeler path. Human judgment only.",
+    "attested_pair is binary and recorded per row. The attested-pair shortcut pre-fills relation + attested_pair=true.",
+    "Distribution across the 4 relations MUST stay within ~12-13 per relation. The helper script warns after ~25 labels if any relation is under-represented."
+  ],
+  "phase_a_scaffolding_note": "Phase A (this card's worker run) ships the empty JSONL + this manifest + the attested-pairs scaffold + the labeler helper script + the test suite. Phase B (Anurag's hand-label session) populates the JSONL to the 50-row target. Both phases share the same manifest schema; current_count and current_distribution are updated by the labeler helper after each accepted row."
+}
